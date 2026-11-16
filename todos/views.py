@@ -6,8 +6,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 
-from .models import Todo
-from .serializers import TodoSerializer
+from .models import Todo, Team
+from .serializers import TodoSerializer, TeamSerializer
 from .pagination import TodoPagination, PaginatedTodoSerializer
 from .auth_serializers import RegisterSerializer
 from .schema_serializers import RegisterResponseSerializer
@@ -238,3 +238,14 @@ class CurrentUserView(APIView):
             "role": profile.role,
             "team": team,
         })
+
+class TeamListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        teams = Team.objects.prefetch_related(
+            "members__user"
+        ).all()
+
+        serializer = TeamSerializer(teams, many=True)
+        return Response(serializer.data)

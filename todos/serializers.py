@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Todo
+from .models import Todo, Team
 
 
 class TodoSerializer(serializers.ModelSerializer):
@@ -24,3 +24,24 @@ class TodoSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+class TeamSerializer(serializers.ModelSerializer):
+    members = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Team
+        fields = ["id", "name", "description", "members"]
+
+    def get_members(self, obj):
+        profiles = obj.members.select_related("user").all()
+
+        return [
+            {
+                "id": profile.user.id,
+                "username": profile.user.username,
+                "first_name": profile.user.first_name,
+                "last_name": profile.user.last_name,
+                "role": profile.role,
+            }
+            for profile in profiles
+        ]
