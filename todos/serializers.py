@@ -4,17 +4,47 @@ from .models import Todo, Team, UserProfile
 
 
 class TodoSerializer(serializers.ModelSerializer):
+    creator = serializers.IntegerField(
+        source="user_id",
+        read_only=True
+    )
+
+    assignee = serializers.PrimaryKeyRelatedField(
+        read_only=True
+    )
+
+    team = serializers.PrimaryKeyRelatedField(
+        read_only=True
+    )
+
+    is_completed = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Todo
         fields = [
-            'id',
-            'title',
-            'description',
-            'is_completed',
-            'created_at',
-            'updated_at',
+            "id",
+            "creator",
+            "assignee",
+            "team",
+            "title",
+            "description",
+            "task_status",
+            "assignment_status",
+            "is_completed",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+
+        read_only_fields = [
+            "id",
+            "creator",
+            "assignee",
+            "team",
+            "assignment_status",
+            "is_completed",
+            "created_at",
+            "updated_at",
+        ]
 
     def validate_title(self, value):
         value = value.strip()
@@ -25,6 +55,16 @@ class TodoSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+    def update(self, instance, validated_data):
+        instance = super().update(instance, validated_data)
+
+        instance.is_completed = (
+            instance.task_status == Todo.TaskStatus.COMPLETED
+        )
+        instance.save(update_fields=["is_completed"])
+
+        return instance
 
 class TeamSerializer(serializers.ModelSerializer):
     members = serializers.SerializerMethodField()
@@ -92,3 +132,8 @@ class UserAdminUpdateSerializer(serializers.Serializer):
                 "Provide at least one field to update."
             )
         return attrs
+
+class TodoAssignmentSerializer(serializers.Serializer):
+    assignee = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(is_active=True)
+    )

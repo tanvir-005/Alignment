@@ -1,6 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Q
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -9,8 +10,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 
-from .models import Todo, Team, UserProfile
-from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer
+from .models import Todo, Team, UserProfile, Notification
+from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer, TodoAssignmentSerializer
 from .pagination import TodoPagination, PaginatedTodoSerializer
 from .auth_serializers import RegisterSerializer
 from .schema_serializers import RegisterResponseSerializer
@@ -23,18 +24,28 @@ class TodoListCreateView(APIView):
         responses=PaginatedTodoSerializer
     )
     def get(self, request):
-        todos = Todo.objects.filter(user=request.user)
+        todos = Todo.objects.filter(
+            Q(user=request.user) | Q(assignee=request.user)
+        ).select_related(
+            "user", "assignee", "team"
+        ).distinct()
 
-        # Filter by status
+        # Filter by task status
         todo_status = request.query_params.get('status')
 
+        status_mapping = {
+            "pending": Todo.TaskStatus.PENDING,
+            "in_progress": Todo.TaskStatus.IN_PROGRESS,
+            "completed": Todo.TaskStatus.COMPLETED,
+        }
+
         if todo_status is not None:
-            if todo_status not in ['completed', 'pending']:
+            if todo_status not in status_mapping:
                 return Response(
                     {
                         "error": (
                             "Invalid status parameter. "
-                            "Must be either 'completed' or 'pending'."
+                            "Must be pending, in_progress, or completed."
                         ),
                         "code": status.HTTP_400_BAD_REQUEST
                     },
@@ -42,7 +53,7 @@ class TodoListCreateView(APIView):
                 )
 
             todos = todos.filter(
-                is_completed=(todo_status == 'completed')
+                task_status=status_mapping[todo_status]
             )
 
         # Search TODOs by title
@@ -89,15 +100,9 @@ class TodoListCreateView(APIView):
 
         # Pagination
         paginator = TodoPagination()
-        paginated_todos = paginator.paginate_queryset(
-            todos,
-            request
-        )
+        paginated_todos = paginator.paginate_queryset(todos, request)
 
-        serializer = TodoSerializer(
-            paginated_todos,
-            many=True
-        )
+        serializer = TodoSerializer(paginated_todos, many=True)
 
         return paginator.get_paginated_response(serializer.data)
 
@@ -108,7 +113,11 @@ class TodoListCreateView(APIView):
     def post(self, request):
         serializer = TodoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(user=request.user)
+
+        serializer.save(
+            user=request.user,
+            team=request.user.profile.team
+        )
 
         return Response(
             serializer.data,
@@ -122,50 +131,51 @@ class TodoDetailView(APIView):
 
     def get_object(self, pk):
         return get_object_or_404(
-            Todo,
-            pk=pk,
-            user=self.request.user
+            Todo.objects.select_related(
+                "user", "assignee", "team"
+            ).filter(
+                Q(user=self.request.user)
+                | Q(assignee=self.request.user)
+            ),
+            pk=pk
         )
 
-    @extend_schema(
-        operation_id='todo_retrieve',
-        responses=TodoSerializer
-    )
+    def can_edit(self, todo, user):
+        if todo.assignee_id is None:
+            return todo.user_id == user.id
+
+        return todo.assignee_id == user.id
+
     def get(self, request, pk):
         todo = self.get_object(pk)
         serializer = TodoSerializer(todo)
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK
-        )
+        return Response(serializer.data)
 
-    @extend_schema(
-        operation_id='todo_update',
-        request=TodoSerializer,
-        responses=TodoSerializer
-    )
     def put(self, request, pk):
         todo = self.get_object(pk)
-        serializer = TodoSerializer(
-            todo,
-            data=request.data
-        )
+
+        if not self.can_edit(todo, request.user):
+            return Response(
+                {"error": "You do not have permission to edit this todo."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = TodoSerializer(todo, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK
-        )
+        return Response(serializer.data)
 
-    @extend_schema(
-        operation_id='todo_partial_update',
-        request=TodoSerializer,
-        responses=TodoSerializer
-    )
     def patch(self, request, pk):
         todo = self.get_object(pk)
+
+        if not self.can_edit(todo, request.user):
+            return Response(
+                {"error": "You do not have permission to edit this todo."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         serializer = TodoSerializer(
             todo,
             data=request.data,
@@ -174,23 +184,20 @@ class TodoDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK
-        )
+        return Response(serializer.data)
 
-    @extend_schema(
-        operation_id='todo_delete',
-        responses={204: None}
-    )
     def delete(self, request, pk):
         todo = self.get_object(pk)
+
+        if todo.assignee_id is not None or todo.user_id != request.user.id:
+            return Response(
+                {"error": "You do not have permission to delete this todo."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         todo.delete()
 
-        return Response(
-            status=status.HTTP_204_NO_CONTENT
-        )
-
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class RegisterView(APIView):
     permission_classes = []
@@ -318,3 +325,57 @@ class UserDetailAdminView(APIView):
         profile.save()
 
         return Response(UserListSerializer(user).data)
+
+class TodoAssignView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        todo = get_object_or_404(Todo, pk=pk)
+
+        if todo.user_id != request.user.id:
+            return Response(
+                {"error": "Only the creator can assign this todo."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if todo.assignee_id is not None:
+            return Response(
+                {"error": "This todo is already assigned."},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        serializer = TodoAssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        assignee = serializer.validated_data["assignee"]
+
+        if assignee.id == request.user.id:
+            return Response(
+                {"error": "You cannot assign a todo to yourself."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if (
+            todo.team_id is None
+            or assignee.profile.team_id != todo.team_id
+        ):
+            return Response(
+                {"error": "Assignee must belong to the same team."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        todo.assignee = assignee
+        todo.assignment_status = Todo.AssignmentStatus.PENDING
+        todo.save(update_fields=["assignee", "assignment_status", "updated_at"])
+
+        Notification.objects.create(
+            recipient=assignee,
+            actor=request.user,
+            todo=todo,
+            message=f"{request.user.username} assigned you a todo: {todo.title}",
+        )
+
+        return Response(
+            TodoSerializer(todo).data,
+            status=status.HTTP_200_OK
+        )

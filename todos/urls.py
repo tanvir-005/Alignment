@@ -1,11 +1,12 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import TodoListCreateView, TodoDetailView, RegisterView, CurrentUserView, TeamListView, UserListView, UserDetailAdminView
+from .views import TodoListCreateView, TodoDetailView, RegisterView, CurrentUserView, TeamListView, UserListView, UserDetailAdminView, TodoAssignView
 from .models import Todo, Team 
 
 urlpatterns = [
     path('todos/', TodoListCreateView.as_view(), name='todo-list-create'),
     path('todos/<int:pk>/', TodoDetailView.as_view(), name='todo-detail'),
+    path("todos/<int:pk>/assign/", TodoAssignView.as_view(), name="todo-assign"),
 
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', TokenObtainPairView.as_view(), name='token-obtain-pair'),
