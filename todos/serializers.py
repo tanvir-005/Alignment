@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Todo, Team
+from django.contrib.auth.models import User
+from .models import Todo, Team, UserProfile
 
 
 class TodoSerializer(serializers.ModelSerializer):
@@ -45,3 +46,49 @@ class TeamSerializer(serializers.ModelSerializer):
             }
             for profile in profiles
         ]
+
+class UserListSerializer(serializers.ModelSerializer):
+    role = serializers.CharField(source="profile.role", read_only=True)
+    team = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "role",
+            "team",
+        ]
+
+    def get_team(self, obj):
+        team = obj.profile.team
+
+        if not team:
+            return None
+
+        return {
+            "id": team.id,
+            "name": team.name,
+        }
+
+class UserAdminUpdateSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(
+        choices=UserProfile.Role.choices,
+        required=False
+    )
+
+    team = serializers.PrimaryKeyRelatedField(
+        queryset=Team.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError(
+                "Provide at least one field to update."
+            )
+        return attrs

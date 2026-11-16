@@ -1,13 +1,16 @@
 from django.shortcuts import get_object_or_404
+from django.contrib.auth.models import User
+from django.db import transaction
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 
-from .models import Todo, Team
-from .serializers import TodoSerializer, TeamSerializer
+from .models import Todo, Team, UserProfile
+from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer
 from .pagination import TodoPagination, PaginatedTodoSerializer
 from .auth_serializers import RegisterSerializer
 from .schema_serializers import RegisterResponseSerializer
@@ -249,3 +252,69 @@ class TeamListView(APIView):
 
         serializer = TeamSerializer(teams, many=True)
         return Response(serializer.data)
+
+class IsAdminUserRole:
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.profile.role == "ADMIN"
+        )
+
+class UserListView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        users = User.objects.select_related(
+            "profile__team"
+        ).all().order_by("id")
+
+        serializer = UserListSerializer(users, many=True)
+        return Response(serializer.data)
+
+class UserDetailAdminView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def patch(self, request, pk):
+        user = get_object_or_404(
+            User.objects.select_related("profile"),
+            pk=pk
+        )
+
+        serializer = UserAdminUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        updates = serializer.validated_data
+        profile = user.profile
+
+        if "role" in updates:
+            new_role = updates["role"]
+
+            if user.id == request.user.id:
+                return Response(
+                    {"error": "You cannot change your own role."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if (
+                profile.role == UserProfile.Role.ADMIN
+                and new_role == UserProfile.Role.MEMBER
+            ):
+                admin_count = UserProfile.objects.filter(
+                    role=UserProfile.Role.ADMIN
+                ).count()
+
+                if admin_count <= 1:
+                    return Response(
+                        {"error": "Cannot demote the last admin."},
+                        status=status.HTTP_409_CONFLICT
+                    )
+
+            profile.role = new_role
+
+        if "team" in updates:
+            profile.team = updates["team"]
+
+        profile.save()
+
+        return Response(UserListSerializer(user).data)

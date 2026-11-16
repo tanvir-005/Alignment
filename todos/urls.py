@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import TodoListCreateView, TodoDetailView, RegisterView, CurrentUserView, TeamListView
-from .models import Todo, Team
+from .views import TodoListCreateView, TodoDetailView, RegisterView, CurrentUserView, TeamListView, UserListView, UserDetailAdminView
+from .models import Todo, Team 
 
 urlpatterns = [
     path('todos/', TodoListCreateView.as_view(), name='todo-list-create'),
@@ -13,4 +13,6 @@ urlpatterns = [
     path('auth/me/', CurrentUserView.as_view(), name='current-user'),
 
     path("teams/", TeamListView.as_view(), name="team-list"),
+    path("users/", UserListView.as_view(), name="user-list"),
+    path("users/<int:pk>/", UserDetailAdminView.as_view(), name="user-detail-admin"),
 ]
