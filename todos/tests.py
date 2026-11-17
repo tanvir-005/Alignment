@@ -4,22 +4,40 @@ from rest_framework.test import APIClient, APITestCase
 from rest_framework import status
 
 from django.urls import reverse
-from todos.models import Todo
+from todos.models import Todo, Team, UserProfile
 
 
 @pytest.fixture
-def user_a(db):
-    return User.objects.create_user(
+def team(db):
+    return Team.objects.create(name="Test Team")
+
+
+@pytest.fixture
+def user_a(db, team):
+    user = User.objects.create_user(
         username="user_a",
         password="StrongPassword123!"
     )
+    UserProfile.objects.create(
+        user=user,
+        role="MEMBER",
+        team=team
+    )
+    return user
+
 
 @pytest.fixture
-def user_b(db):
-    return User.objects.create_user(
+def user_b(db, team):
+    user = User.objects.create_user(
         username="user_b",
         password="StrongPassword123!"
     )
+    UserProfile.objects.create(
+        user=user,
+        role="MEMBER",
+        team=team
+    )
+    return user
 
 @pytest.fixture
 def client():
@@ -242,24 +260,35 @@ class TodoQueryTests(APITestCase):
             password='StrongPassword123!'
         )
 
+        team = Team.objects.create(name="Query Test Team")
+
+        UserProfile.objects.create(
+            user=self.user,
+            role="MEMBER",
+            team=team
+        )
+
         self.client.force_authenticate(user=self.user)
 
         Todo.objects.create(
             user=self.user,
+            team=team,
             title='Django tutorial',
-            is_completed=False
+            task_status=Todo.TaskStatus.PENDING
         )
 
         Todo.objects.create(
             user=self.user,
+            team=team,
             title='Python programming',
-            is_completed=True
+            task_status=Todo.TaskStatus.COMPLETED
         )
 
         Todo.objects.create(
             user=self.user,
+            team=team,
             title='Django REST framework',
-            is_completed=True
+            task_status=Todo.TaskStatus.COMPLETED
         )
 
         self.url = '/api/todos/'
