@@ -1,8 +1,7 @@
-
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import styles from "./page.module.css";
 
 function formatDate(value) {
@@ -18,14 +17,20 @@ function formatDate(value) {
 }
 
 export default function NotificationsPage() {
+  const router = useRouter();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updating, setUpdating] = useState(false);
+  
+  const loadNotifications = useCallback(async ({ silent = false } = {}) => {
+    if (document.visibilityState === "hidden") return;
 
-  const loadNotifications = useCallback(async () => {
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
+
     setError("");
 
     try {
@@ -41,17 +46,13 @@ export default function NotificationsPage() {
 
       if (!listResponse.ok) {
         throw new Error(
-          listData.detail ||
-            listData.error ||
-            "Unable to load notifications."
+          listData.detail || listData.error || "Unable to load notifications."
         );
       }
 
       if (!countResponse.ok) {
         throw new Error(
-          countData.detail ||
-            countData.error ||
-            "Unable to load unread count."
+          countData.detail || countData.error || "Unable to load unread count."
         );
       }
 
@@ -60,14 +61,56 @@ export default function NotificationsPage() {
     } catch (err) {
       setError(err.message || "Something went wrong.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
+  
   useEffect(() => {
     loadNotifications();
+
+    function handleNotificationUpdate() {
+      loadNotifications({ silent: true });
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        loadNotifications({ silent: true });
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      loadNotifications({ silent: true });
+    }, 30000);
+
+    window.addEventListener(
+      "notifications-updated",
+      handleNotificationUpdate
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    return () => {
+      window.clearInterval(intervalId);
+
+      window.removeEventListener(
+        "notifications-updated",
+        handleNotificationUpdate
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
   }, [loadNotifications]);
 
+  
   async function markAsRead(notificationId) {
     setUpdating(true);
     setError("");
@@ -87,12 +130,25 @@ export default function NotificationsPage() {
       }
 
       window.dispatchEvent(new Event("notifications-updated"));
-      await loadNotifications();
+      await loadNotifications({ silent: true });
+
+      return true;
     } catch (err) {
       setError(err.message || "Something went wrong.");
+      return false;
     } finally {
       setUpdating(false);
     }
+  }
+
+  async function openNotification(notification) {
+    if (!notification.is_read) {
+      const success = await markAsRead(notification.id);
+
+      if (!success) return;
+    }
+
+    router.push(`/todos/${notification.todo}`);
   }
 
   async function markAllAsRead() {
@@ -192,9 +248,12 @@ export default function NotificationsPage() {
                 </div>
 
                 <div className={styles.actions}>
-                  <Link href={`/todos/${notification.todo}`}>
+                  <button
+                    onClick={() => openNotification(notification)}
+                    disabled={updating}
+                  >
                     View task
-                  </Link>
+                  </button>
 
                   {!notification.is_read && (
                     <button

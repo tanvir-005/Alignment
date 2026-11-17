@@ -14,23 +14,43 @@ export default function AdminPage() {
   const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
 
+  
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
+    setAccessDenied(false);
 
     try {
-      const [usersResponse, teamsResponse, meResponse] =
-        await Promise.all([
-          fetch("/api/users/", { cache: "no-store" }),
-          fetch("/api/teams/", { cache: "no-store" }),
-          fetch("/api/auth/me", { cache: "no-store" }),
-        ]);
+      // First, identify the logged-in user.
+      const meResponse = await fetch("/api/auth/me", {
+        cache: "no-store",
+      });
 
-      const [usersData, teamsData, meData] = await Promise.all([
+      const meData = await meResponse.json();
+
+      if (!meResponse.ok) {
+        throw new Error("Unable to identify the current user.");
+      }
+
+      setCurrentUser(meData);
+
+      // Only administrators can access user management.
+      if (meData.role !== "ADMIN") {
+        setAccessDenied(true);
+        return;
+      }
+
+      // Fetch users and teams only for administrators.
+      const [usersResponse, teamsResponse] = await Promise.all([
+        fetch("/api/users/", { cache: "no-store" }),
+        fetch("/api/teams/", { cache: "no-store" }),
+      ]);
+
+      const [usersData, teamsData] = await Promise.all([
         usersResponse.json(),
         teamsResponse.json(),
-        meResponse.json(),
       ]);
 
       if (!usersResponse.ok) {
@@ -45,10 +65,6 @@ export default function AdminPage() {
         );
       }
 
-      if (!meResponse.ok) {
-        throw new Error("Unable to identify the current user.");
-      }
-
       const userList = Array.isArray(usersData)
         ? usersData
         : usersData.results || [];
@@ -59,7 +75,6 @@ export default function AdminPage() {
 
       setUsers(userList);
       setTeams(teamList);
-      setCurrentUser(meData);
 
       const initialDrafts = {};
 
@@ -157,6 +172,16 @@ export default function AdminPage() {
 
   if (loading) {
     return <div className={styles.state}>Loading administration...</div>;
+  }
+  if (accessDenied) {
+    return (
+      <section className={styles.page}>
+        <div className={styles.state}>
+          <h1>Access denied</h1>
+          <p>You do not have permission to access user management.</p>
+        </div>
+      </section>
+    );
   }
 
   return (
