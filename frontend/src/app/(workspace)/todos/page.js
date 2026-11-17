@@ -176,18 +176,20 @@ export default function TodosPage() {
           </p>
         </div>
 
-        <button
-          className={styles.primaryButton}
-          onClick={() => {
-            setShowCreateForm((value) => !value);
-            setFormError("");
-          }}
-        >
-          {showCreateForm ? "Cancel" : "+ New task"}
-        </button>
+        {user?.role !== "ADMIN" && (
+          <button
+            className={styles.primaryButton}
+            onClick={() => {
+              setShowCreateForm((value) => !value);
+              setFormError("");
+            }}
+          >
+            {showCreateForm ? "Cancel" : "+ New task"}
+          </button>
+        )}
       </div>
 
-      {showCreateForm && (
+      {showCreateForm && user?.role !== "ADMIN" && (
         <form className={styles.createForm} onSubmit={handleCreate}>
           <div className={styles.formHeader}>
             <h2>Create a task</h2>
@@ -299,9 +301,11 @@ export default function TodosPage() {
           <p>
             {search || status
               ? "Try changing your search or filters."
-              : "Create your first task to get started."}
+              : user?.role === "ADMIN"
+                ? "No tasks are associated with your account."
+                : "Create your first task to get started."}
           </p>
-          {!search && !status && (
+          {!search && !status && user?.role !== "ADMIN" && (
             <button
               className={styles.primaryButton}
               onClick={() => setShowCreateForm(true)}

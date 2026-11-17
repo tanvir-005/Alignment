@@ -12,13 +12,14 @@ export default function TodoAssignmentPanel({ todo, user, onUpdated }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const isCreator = user?.id === todo.creator;
-  const isAssignee = user?.id === todo.assignee;
+  const isAdmin = user?.role === "ADMIN";
+  const isCreator = !isAdmin && user?.id === todo.creator;
+  const isAssignee = !isAdmin && user?.id === todo.assignee;
   const isPending = todo.assignment_status === "PENDING";
 
   useEffect(() => {
     async function loadMembers() {
-      if (!todo.team) {
+      if (isAdmin || !todo.team) {
         setLoadingMembers(false);
         return;
       }
@@ -52,7 +53,7 @@ export default function TodoAssignmentPanel({ todo, user, onUpdated }) {
     }
 
     loadMembers();
-  }, [todo.team, user?.id]);
+  }, [todo.team, user?.id, isAdmin]);
 
   async function handleAction(url, decision = null) {
     setSubmitting(true);
@@ -111,7 +112,11 @@ export default function TodoAssignmentPanel({ todo, user, onUpdated }) {
         </span>
       </div>
 
-      {todo.assignee ? (
+      {isAdmin ? (
+        <p className={styles.description}>
+          Read-only inspection. Administrators cannot change task assignments.
+        </p>
+      ) : todo.assignee ? (
         <div className={styles.assigneeInfo}>
           <span>Assigned to</span>
           <strong>

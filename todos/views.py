@@ -111,6 +111,12 @@ class TodoListCreateView(APIView):
         responses={201: TodoSerializer}
     )
     def post(self, request):
+        if request.user.profile.role == UserProfile.Role.ADMIN:
+            return Response(
+                {"detail": "Administrators have read-only todo access."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = TodoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -130,17 +136,21 @@ class TodoDetailView(APIView):
     serializer_class = TodoSerializer
 
     def get_object(self, pk):
+        visibility = Q(user=self.request.user) | Q(assignee=self.request.user)
+        if self.request.user.profile.role == UserProfile.Role.ADMIN:
+            visibility = Q()
+
         return get_object_or_404(
             Todo.objects.select_related(
                 "user", "assignee", "team"
-            ).filter(
-                Q(user=self.request.user)
-                | Q(assignee=self.request.user)
-            ),
+            ).filter(visibility),
             pk=pk
         )
 
     def can_edit(self, todo, user):
+        if user.profile.role == UserProfile.Role.ADMIN:
+            return False
+
         if todo.assignee_id is None:
             return todo.user_id == user.id
 
@@ -189,7 +199,11 @@ class TodoDetailView(APIView):
     def delete(self, request, pk):
         todo = self.get_object(pk)
 
-        if todo.assignee_id is not None or todo.user_id != request.user.id:
+        if (
+            request.user.profile.role == UserProfile.Role.ADMIN
+            or todo.assignee_id is not None
+            or todo.user_id != request.user.id
+        ):
             return Response(
                 {"error": "You do not have permission to delete this todo."},
                 status=status.HTTP_403_FORBIDDEN
@@ -340,6 +354,12 @@ class TodoAssignView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        if request.user.profile.role == UserProfile.Role.ADMIN:
+            return Response(
+                {"detail": "Administrators have read-only todo access."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         todo = get_object_or_404(Todo, pk=pk)
 
         if todo.user_id != request.user.id:
@@ -395,6 +415,12 @@ class TodoRespondView(APIView):
 
     @transaction.atomic
     def post(self, request, pk):
+        if request.user.profile.role == UserProfile.Role.ADMIN:
+            return Response(
+                {"detail": "Administrators have read-only todo access."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         todo = get_object_or_404(
             Todo.objects.select_for_update(),
             pk=pk,
@@ -488,4 +514,139 @@ class NotificationMarkAllReadView(APIView):
         return Response({
             "detail": "All notifications marked as read.",
             "updated_count": updated_count,
+        })
+
+class AdminDashboardView(APIView):
+    """Workspace-wide, read-only statistics for administrators."""
+
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        users = User.objects.select_related("profile__team").order_by("username")
+        todos = Todo.objects.select_related("team", "user", "assignee")
+        total_todos = todos.count()
+        completed_todos = todos.filter(
+            task_status=Todo.TaskStatus.COMPLETED
+        ).count()
+        incomplete_todos = total_todos - completed_todos
+        pending_assignments = todos.filter(
+            assignment_status=Todo.AssignmentStatus.PENDING
+        ).count()
+
+        user_activity = []
+        for user in users:
+            assigned = Todo.objects.filter(assignee=user)
+            assigned_count = assigned.count()
+            completed_count = assigned.filter(
+                task_status=Todo.TaskStatus.COMPLETED
+            ).count()
+            created_count = Todo.objects.filter(user=user).count()
+            user_activity.append({
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.profile.role,
+                "team": user.profile.team.name if user.profile.team else None,
+                "assigned_todos": assigned_count,
+                "created_todos": created_count,
+                "completed_todos": completed_count,
+                "pending_todos": assigned.filter(
+                    task_status=Todo.TaskStatus.PENDING
+                ).count(),
+                "in_progress_todos": assigned.filter(
+                    task_status=Todo.TaskStatus.IN_PROGRESS
+                ).count(),
+                "completion_rate": round(
+                    completed_count / assigned_count * 100
+                ) if assigned_count else 0,
+            })
+
+        team_activity = []
+        for team in Team.objects.order_by("name"):
+            team_todos = todos.filter(team=team)
+            team_total = team_todos.count()
+            team_completed = team_todos.filter(
+                task_status=Todo.TaskStatus.COMPLETED
+            ).count()
+            team_activity.append({
+                "id": team.id,
+                "name": team.name,
+                "members": team.members.count(),
+                "todos": team_total,
+                "completed_todos": team_completed,
+                "incomplete_todos": team_total - team_completed,
+                "completion_rate": round(
+                    team_completed / team_total * 100
+                ) if team_total else 0,
+            })
+
+        recent_activity = [{
+            "id": notification.id,
+            "message": notification.message,
+            "actor": notification.actor.username if notification.actor else None,
+            "recipient": notification.recipient.username,
+            "todo_id": notification.todo_id,
+            "todo_title": notification.todo.title,
+            "created_at": notification.created_at,
+        } for notification in Notification.objects.select_related(
+            "actor", "recipient", "todo"
+        ).order_by("-created_at")[:10]]
+
+        return Response({
+            "overview": {
+                "total_users": users.count(),
+                "total_teams": Team.objects.count(),
+                "total_todos": total_todos,
+                "incomplete_todos": incomplete_todos,
+                "completed_todos": completed_todos,
+                "pending_assignments": pending_assignments,
+                "completion_rate": round(
+                    completed_todos / total_todos * 100
+                ) if total_todos else 0,
+            },
+            "task_status": {
+                "pending": todos.filter(task_status=Todo.TaskStatus.PENDING).count(),
+                "in_progress": todos.filter(task_status=Todo.TaskStatus.IN_PROGRESS).count(),
+                "completed": completed_todos,
+            },
+            "teams": team_activity,
+            "users": user_activity,
+            "recent_activity": recent_activity,
+        })
+
+
+class AdminUserTodosView(APIView):
+    """Read-only inspection of todos created by or assigned to a user."""
+
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request, pk):
+        user = get_object_or_404(User.objects.select_related("profile__team"), pk=pk)
+        todos = Todo.objects.filter(
+            Q(user=user) | Q(assignee=user)
+        ).select_related("user", "assignee", "team").order_by("-updated_at")
+
+        results = [{
+            "id": todo.id,
+            "title": todo.title,
+            "description": todo.description,
+            "creator": todo.user.username,
+            "assignee": todo.assignee.username if todo.assignee else None,
+            "team": todo.team.name if todo.team else None,
+            "task_status": todo.task_status,
+            "assignment_status": todo.assignment_status,
+            "created_at": todo.created_at,
+            "updated_at": todo.updated_at,
+        } for todo in todos]
+
+        return Response({
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "role": user.profile.role,
+                "team": user.profile.team.name if user.profile.team else None,
+            },
+            "results": results,
+            "count": len(results),
         })

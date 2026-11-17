@@ -630,3 +630,122 @@ def test_user_can_mark_all_notifications_as_read(
         recipient=another_member,
         is_read=False
     ).count() == 0
+
+
+# -------------------------------------------------------------------
+# Bonus admin dashboard and read-only inspection
+# -------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_admin_can_view_dashboard(api_client, admin, todo, assigned_todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get("/api/admin/dashboard/")
+
+    assert response.status_code == 200
+    assert response.data["overview"]["total_users"] >= 3
+    assert response.data["overview"]["total_todos"] == 1
+    assert "completion_rate" in response.data["overview"]
+    assert len(response.data["users"]) >= 3
+    assert len(response.data["teams"]) >= 1
+
+
+@pytest.mark.django_db
+def test_member_cannot_view_admin_dashboard(api_client, member):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.get("/api/admin/dashboard/")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_can_inspect_user_todos_read_only(
+    api_client, admin, member, todo, assigned_todo
+):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get(f"/api/admin/users/{member.id}/todos/")
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert {item["id"] for item in response.data["results"]} == {
+        todo.id
+    }
+
+
+@pytest.mark.django_db
+def test_member_cannot_inspect_another_users_todos(
+    api_client, member, another_member
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.get(f"/api/admin/users/{another_member.id}/todos/")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_can_view_any_todo_detail_read_only(api_client, admin, todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get(f"/api/todos/{todo.id}/")
+
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_admin_cannot_edit_todo(api_client, admin, todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/",
+        {"title": "Admin edited this"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    todo.refresh_from_db()
+    assert todo.title == "Workspace test todo"
+
+
+@pytest.mark.django_db
+def test_admin_cannot_create_todo(api_client, admin):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.post(
+        "/api/todos/",
+        {"title": "Admin-created task", "description": ""},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_cannot_assign_or_respond(api_client, admin, todo):
+    api_client.force_authenticate(user=admin)
+
+    assign_response = api_client.post(
+        f"/api/todos/{todo.id}/assign/",
+        {"assignee": admin.id},
+        format="json",
+    )
+    respond_response = api_client.post(
+        f"/api/todos/{todo.id}/respond/",
+        {"decision": "ACCEPTED"},
+        format="json",
+    )
+
+    assert assign_response.status_code == 403
+    assert respond_response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_cannot_delete_todo(api_client, admin, todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.delete(f"/api/todos/{todo.id}/")
+
+    assert response.status_code == 403
+    assert Todo.objects.filter(id=todo.id).exists()

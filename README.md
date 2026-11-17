@@ -15,7 +15,7 @@ The Scroll of Procrastination is a collaborative task management application whe
 - **Task assignment:** Assign tasks to teammates within the same team.
 - **Assignment workflow:** Assignees can accept or reject assignments.
 - **Notifications:** Receive updates about task assignments and responses.
-- **Admin dashboard:** Manage users, roles, and team assignments.
+- **Admin dashboard:** Workspace metrics, team statistics, user activity, recent assignment events, and user task inspection.
 
 ## Technology Stack
 
@@ -55,8 +55,8 @@ JWT tokens are stored in HttpOnly cookies. The browser communicates with Next.js
 
 ### Roles
 
-- **ADMIN:** Can manage users, roles, and team assignments.
-- **MEMBER:** Can manage tasks and interact with assigned tasks.
+- **ADMIN:** Can manage users, roles, and team assignments; inspect workspace todos through read-only dashboard views.
+- **MEMBER:** Can create, assign, edit, and interact with todos according to assignment permissions.
 
 The first registered user becomes an admin. Subsequent registrations receive the Member role.
 
@@ -84,6 +84,7 @@ Key permissions:
 - After assignment, only the assignee can edit the task.
 - Assigned tasks cannot be deleted.
 - The creator can view the task but cannot edit it after assignment.
+- Administrators have read-only todo access. They cannot create, edit, assign, accept, reject, complete, or delete todos.
 
 ## Project Structure
 
@@ -198,12 +199,18 @@ All backend endpoints are prefixed with `/api/`.
 |---|---|
 | Authentication | `/auth/` |
 | Tasks | `/todos/` |
-| Assignments | `/assignments/` |
+| Assignments | `/todos/{id}/assign/`, `/todos/{id}/respond/` |
 | Notifications | `/notifications/` |
 | Teams | `/teams/` |
 | Users | `/users/` |
+| Admin dashboard | `GET /admin/dashboard/` |
+| User todo inspection | `GET /admin/users/{id}/todos/` |
 
-API documentation is available through the configured API documentation endpoint.
+The admin dashboard and user inspection endpoints require the `ADMIN` role. Admin todo detail access is read-only.
+
+Interactive API documentation: `http://127.0.0.1:8080/api/docs/`
+
+OpenAPI schema: `http://127.0.0.1:8080/api/schema/`
 
 ## Testing
 
@@ -213,7 +220,11 @@ Run the backend test suite from the project root:
 pytest -v
 ```
 
-The test suite covers authentication, task operations, permissions, assignments, notifications, filtering, sorting, and pagination.
+The test suite covers authentication, task operations, permissions, assignments, notifications, admin dashboard access, read-only admin todo inspection, filtering, sorting, and pagination.
+
+## Admin Dashboard
+
+The administration page provides workspace-wide totals, task status distribution, team completion statistics, user-wise assignment metrics, and recent assignment activity. Administrators can inspect a user's todos and open individual task details, but all todo access remains read-only.
 
 ## Useful Commands
 
