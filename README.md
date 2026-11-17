@@ -1,273 +1,236 @@
 # The Scroll of Procrastination
-A TODO management REST API built with **Django REST Framework**.
+
+A team-based TODO management system built with Django REST Framework and Next.js.
+
+## Overview
+
+The Scroll of Procrastination is a collaborative task management application where team members can create, assign, track, and manage tasks. It includes role-based access control, assignment workflows, and notifications.
 
 ## Features
-- User registration and JWT authentication.
-- Create, retrieve, update, and delete TODOs.
-- User-specific TODO management.
-- Filter TODOs by completion status.
-- Search TODOs by title.
-- Sort TODOs by creation date or title.
-- Paginated TODO listing.
-- Input validation and consistent error responses.
-- Request logging.
-- Interactive API documentation using Swagger UI.
 
-## Tech Stack
-- Python 3.12
-- Django 5.2
-- Django REST Framework
-- Simple JWT
-- SQLite
-- drf-spectacular
-- pytest
+- **Authentication:** JWT-based login and registration.
+- **Role management:** Admin and Member roles.
+- **Team management:** Organize users into teams.
+- **Task management:** Create, view, update, search, filter, sort, and paginate tasks.
+- **Task assignment:** Assign tasks to teammates within the same team.
+- **Assignment workflow:** Assignees can accept or reject assignments.
+- **Notifications:** Receive updates about task assignments and responses.
+- **Admin dashboard:** Manage users, roles, and team assignments.
 
-## Project Setup
+## Technology Stack
+
+| Layer | Technologies |
+|---|---|
+| Backend | Python, Django, Django REST Framework |
+| Authentication | Simple JWT, HttpOnly cookies |
+| API documentation | drf-spectacular |
+| Database | SQLite |
+| Frontend | Next.js, React, JavaScript |
+| Styling | CSS Modules |
+| Testing | pytest, pytest-django |
+
+## Architecture
+
+The application uses a Backend-for-Frontend (BFF) architecture.
+
+```text
+Browser
+   |
+   v
+Next.js Frontend
+   |
+   v
+Next.js API Routes
+   |
+   v
+Django REST API
+   |
+   v
+SQLite Database
+```
+
+JWT tokens are stored in HttpOnly cookies. The browser communicates with Next.js API routes, which handle requests to the Django backend.
+
+## Business Rules
+
+### Roles
+
+- **ADMIN:** Can manage users, roles, and team assignments.
+- **MEMBER:** Can manage tasks and interact with assigned tasks.
+
+The first registered user becomes an admin. Subsequent registrations receive the Member role.
+
+### Tasks
+
+Task statuses:
+
+- `PENDING`
+- `IN_PROGRESS`
+- `COMPLETED`
+
+### Assignments
+
+Assignment statuses:
+
+- `PENDING`
+- `ACCEPTED`
+- `REJECTED`
+
+Key permissions:
+
+- A task can be assigned to a teammate in the same team.
+- Users cannot assign tasks to themselves.
+- Assignees can accept or reject assignments.
+- After assignment, only the assignee can edit the task.
+- Assigned tasks cannot be deleted.
+- The creator can view the task but cannot edit it after assignment.
+
+## Project Structure
+
+```text
+todo-workspace/
+├── config/                 # Django project configuration
+├── todos/                  # Tasks, users, teams, notifications
+├── frontend/               # Next.js application
+├── .env.example
+├── docker-compose.yml
+├── Dockerfile
+├── manage.py
+├── pytest.ini
+├── requirements.txt
+└── README.md
+```
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 24+
+- npm
 
 ### 1. Clone the repository
+
 ```bash
-git clone https://github.com/tanvir-005/the-scroll-of-procrastination.git
-cd the-scroll-of-procrastination
+git clone https://github.com/tanvir-005/todo-workspace.git
+cd todo-workspace
 ```
 
-### 2. Create a virtual environment
+### 2. Set up the backend
+
+Create and activate a virtual environment:
+
 ```bash
 python -m venv .venv
-```
-Activate it:
-**Linux/macOS**
-```bash
 source .venv/bin/activate
 ```
-**Windows**
-```bash
-.venv\Scripts\activate
-```
 
-### 3. Install dependencies
+Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
-Copy the example environment file and update it for your local setup:
+Configure environment variables:
 
 ```bash
 cp .env.example .env
 ```
 
-Then update your `.env` file:
+Update the environment values as needed, including the Django secret key and allowed hosts.
 
-```env
-SECRET_KEY=your-django-secret-key
-DEBUG=True
-ALLOWED_HOSTS=127.0.0.1,localhost
-MAX_REQUESTS=30
-```
+Run migrations and load demo data:
 
-Generate a Django secret key using:
-
-```bash
-python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-```
-
-### 5. Apply migrations
 ```bash
 python manage.py migrate
+python manage.py seed_demo
 ```
 
-### 6. Start the development server
-Make sure your `.env` file exists and contains the required values, then run:
+Start the backend:
 
 ```bash
-python manage.py runserver
+python manage.py runserver 8080
 ```
 
-### 7. Or run with Docker Compose
+Backend API: `http://127.0.0.1:8080/api/`
+
+### 3. Set up the frontend
+
+Open another terminal:
+
 ```bash
-docker compose up --build
+cd frontend
+npm install
 ```
 
-The API base URL is:
-`http://127.0.0.1:8000/api/`
+Create `frontend/.env.local`:
 
-## API Endpoints
-
-### Authentication
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/auth/register/` | Register with `name`, `email`, and `password` |
-| POST | `/api/auth/login/` | Obtain JWT access and refresh tokens |
-| POST | `/api/auth/refresh/` | Refresh an access token |
-
-### TODO Management
-
-All TODO endpoints require JWT authentication.
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/todos/` | List TODOs |
-| POST | `/api/todos/` | Create a TODO |
-| GET | `/api/todos/<id>/` | Retrieve a TODO |
-| PUT | `/api/todos/<id>/` | Update a TODO |
-| PATCH | `/api/todos/<id>/` | Partially update a TODO |
-| DELETE | `/api/todos/<id>/` | Delete a TODO |
-
-### JWT Authentication
-
-Include your access token in the request header:
-
-```http
-Authorization: Bearer YOUR_ACCESS_TOKEN
+```env
+DJANGO_API_URL=http://127.0.0.1:8080/api
 ```
 
-Register a user with:
+Start the frontend:
 
-```json
-{"name":"Your Name","email":"you@example.com","password":"StrongPassword123!"}
+```bash
+npm run dev
 ```
 
-The API generates a unique username from the email local part (for example, `you` or `you1`). Log in using that generated username and your password:
+Frontend: `http://localhost:3000`
 
-```json
-{"username":"you","password":"StrongPassword123!"}
-```
+## Demo Accounts
 
-Successful registration returns a status message and the created user summary:
+The following accounts are created by `seed_demo` on a fresh database.
 
-```json
-{
-  "message": "User registered successfully.",
-  "user": {
-    "id": 1,
-    "username": "you",
-    "email": "you@example.com"
-  }
-}
-```
+| Username | Password | Role | Team |
+|---|---|---|---|
+| `demo_admin` | `Admin@2026Demo` | ADMIN | Team Alpha |
+| `alice` | `Alice@2026Secure` | MEMBER | Team Alpha |
+| `bob` | `Bob@2026Secure` | MEMBER | Team Alpha |
+| `charlie` | `Charlie@2026Secure` | MEMBER | Team Beta |
 
-Successful login returns JWT tokens:
+The seed command is repeatable and does not overwrite existing users' passwords, roles, or team assignments.
 
-```json
-{
-  "refresh": "YOUR_REFRESH_TOKEN",
-  "access": "YOUR_ACCESS_TOKEN"
-}
-```
+## API Overview
 
-When the access token expires, send the `refresh` token to `/api/auth/refresh/`:
+All backend endpoints are prefixed with `/api/`.
 
-```json
-{"refresh":"YOUR_REFRESH_TOKEN"}
-```
+| Resource | Endpoint |
+|---|---|
+| Authentication | `/auth/` |
+| Tasks | `/todos/` |
+| Assignments | `/assignments/` |
+| Notifications | `/notifications/` |
+| Teams | `/teams/` |
+| Users | `/users/` |
 
-The response returns a fresh access token:
+API documentation is available through the configured API documentation endpoint.
 
-```json
-{
-  "access": "NEW_ACCESS_TOKEN"
-}
-```
+## Testing
 
-## Rate Limiting
-
-Requests to `/api/` are limited by client IP over a rolling 60-second window. Set `MAX_REQUESTS` in `.env` to change the number of requests allowed per IP; the example configuration allows 30. Requests above the limit return `429 Too Many Requests` with the standard error shape:
-
-```json
-{
-  "error": "Too many requests.",
-  "code": 429
-}
-```
-
-The limit is loaded when the server starts, so restart the server after changing `MAX_REQUESTS`. Request counts are held in process memory, reset on restart, and are not shared across multiple server processes; this implementation is intended for local or single-process use, not production-scale rate limiting.
-
-### TODO Query Parameters
-
-The TODO listing endpoint supports:
-
-| Parameter | Example | Description |
-|---|---|---|
-| `page` | `?page=2` | Select page |
-| `limit` | `?limit=10` | Number of results per page |
-| `status` | `?status=completed` | Filter by `completed` or `pending` |
-| `search` | `?search=groceries` | Search TODO titles |
-| `sort_by` | `?sort_by=title` | Sort by `created_at` or `title` |
-| `order` | `?order=asc` | Sort direction: `asc` or `desc` |
-
-Example:
-
-```http
-GET /api/todos/?status=pending&search=groceries&sort_by=created_at&order=desc&page=1&limit=10
-```
-
-## API Documentation
-
-Interactive Swagger documentation:
-
-`http://127.0.0.1:8000/api/docs/`
-
-OpenAPI schema:
-
-`http://127.0.0.1:8000/api/schema/`
-
-## Running Tests
-
-Run the test suite:
+Run the backend test suite from the project root:
 
 ```bash
 pytest -v
 ```
 
-Validate the OpenAPI schema:
+The test suite covers authentication, task operations, permissions, assignments, notifications, filtering, sorting, and pagination.
+
+## Useful Commands
+
+**Backend**
 
 ```bash
-python manage.py spectacular --file schema.yml --validate
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver 8080
+pytest -v
 ```
 
-## Error Response Format
+**Frontend**
 
-API errors follow a consistent structure:
-
-```json
-{
-  "error": "Validation failed.",
-  "code": 400
-}
+```bash
+npm run dev
+npm run lint
+npm run build
+npm start
 ```
-
-This is the same shape returned by validation failures and invalid query parameters.
-
-## Project Structure
-
-```text
-the-scroll-of-procrastination/
-├── config/
-│   ├── settings.py
-│   ├── urls.py
-│   └── ...
-├── todos/
-│   ├── migrations/
-│   ├── middleware/
-│   ├── utils/
-│   ├── models.py
-│   ├── serializers.py
-│   ├── views.py
-│   ├── urls.py
-│   └── tests.py
-├── manage.py
-├── requirements.txt
-├── pytest.ini
-├── schema.yml
-└── README.md
-```
-
-## Notes
-
-- Each authenticated user can access and manage only their own TODOs.
-- The SQLite database is created locally through Django migrations.
-- TODO lists return 10 items per page by default; `limit` can be set up to 50.
-- After changing a model, create and apply migrations with `python manage.py makemigrations` and `python manage.py migrate`.
-- Request logs are written to `logs/django.log` and include the method, path, status, duration, and username when available.
-- Keep `.env` and other secret files out of version control.
