@@ -85,10 +85,13 @@ export default function TodoAssignmentPanel({ todo, user, onUpdated }) {
 
       setSuccess(
         decision
-          ? `Assignment ${decision.toLowerCase()}.`
-          : "Task assigned successfully."
-      );
+            ? `Assignment ${decision.toLowerCase()}.`
+            : "Task assigned successfully."
+        );
 
+      // Notify the workspace shell to refresh its unread count.
+      window.dispatchEvent(new Event("notifications-updated"));
+  
       await onUpdated();
     } catch (err) {
       setError(err.message || "Something went wrong.");

@@ -210,3 +210,9 @@
     flex-direction: column;
   }
 }
+
+.todoCount {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, #777);
+}

@@ -204,6 +204,8 @@ export default function AdminPage() {
               <th>Email</th>
               <th>Role</th>
               <th>Team</th>
+              <th>Created</th>
+              <th>Assigned</th>
               <th></th>
             </tr>
           </thead>
@@ -263,6 +265,14 @@ export default function AdminPage() {
                     </select>
                   </td>
 
+                  <td className={styles.todoCount}>
+                    {user.created_todo_count ?? 0}
+                  </td>
+
+                  <td className={styles.todoCount}>
+                    {user.assigned_todo_count ?? 0}
+                  </td>
+
                   <td>
                     <button
                       className={styles.saveButton}
@@ -278,7 +288,7 @@ export default function AdminPage() {
 
             {filteredUsers.length === 0 && (
               <tr>
-                <td colSpan={5} className={styles.empty}>
+                <td colSpan={7} className={styles.empty}>
                   No users found.
                 </td>
               </tr>

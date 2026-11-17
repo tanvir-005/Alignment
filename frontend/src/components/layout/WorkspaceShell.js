@@ -28,10 +28,14 @@ export default function WorkspaceShell({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  
   useEffect(() => {
     let active = true;
 
     async function loadUnreadCount() {
+      // Do not poll while the browser tab is hidden.
+      if (document.visibilityState === "hidden") return;
+
       try {
         const response = await fetch(
           "/api/notifications/unread-count/",
@@ -50,13 +54,25 @@ export default function WorkspaceShell({ children }) {
       }
     }
 
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        loadUnreadCount();
+      }
+    }
+
     loadUnreadCount();
 
+    // Refresh every 30 seconds while the page is visible.
+    const intervalId = window.setInterval(loadUnreadCount, 30000);
+
     window.addEventListener("notifications-updated", loadUnreadCount);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       active = false;
+      window.clearInterval(intervalId);
       window.removeEventListener("notifications-updated", loadUnreadCount);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [pathname]);
 

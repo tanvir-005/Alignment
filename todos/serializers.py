@@ -90,6 +90,8 @@ class TeamSerializer(serializers.ModelSerializer):
 class UserListSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source="profile.role", read_only=True)
     team = serializers.SerializerMethodField()
+    created_todo_count = serializers.IntegerField(read_only=True)
+    assigned_todo_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = User
@@ -101,6 +103,8 @@ class UserListSerializer(serializers.ModelSerializer):
             "last_name",
             "role",
             "team",
+            "created_todo_count",
+            "assigned_todo_count",
         ]
 
     def get_team(self, obj):

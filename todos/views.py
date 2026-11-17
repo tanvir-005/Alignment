@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Count
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -274,7 +274,10 @@ class UserListView(APIView):
     def get(self, request):
         users = User.objects.select_related(
             "profile__team"
-        ).all().order_by("id")
+        ).annotate(
+            created_todo_count=Count("todos", distinct=True),
+            assigned_todo_count=Count("assigned_todos", distinct=True),
+        ).order_by("id")
 
         serializer = UserListSerializer(users, many=True)
         return Response(serializer.data)
@@ -323,6 +326,13 @@ class UserDetailAdminView(APIView):
             profile.team = updates["team"]
 
         profile.save()
+
+        user = User.objects.select_related(
+            "profile__team"
+        ).annotate(
+            created_todo_count=Count("todos", distinct=True),
+            assigned_todo_count=Count("assigned_todos", distinct=True),
+        ).get(pk=user.pk)
 
         return Response(UserListSerializer(user).data)
 
