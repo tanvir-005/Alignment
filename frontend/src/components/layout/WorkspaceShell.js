@@ -26,6 +26,39 @@ export default function WorkspaceShell({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadUnreadCount() {
+      try {
+        const response = await fetch(
+          "/api/notifications/unread-count/",
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        if (active) {
+          setUnreadCount(data.unread_count ?? 0);
+        }
+      } catch (error) {
+        console.error("Unable to load unread count:", error);
+      }
+    }
+
+    loadUnreadCount();
+
+    window.addEventListener("notifications-updated", loadUnreadCount);
+
+    return () => {
+      active = false;
+      window.removeEventListener("notifications-updated", loadUnreadCount);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     async function loadUser() {
@@ -100,7 +133,12 @@ export default function WorkspaceShell({ children }) {
         </div>
 
         <nav className={styles.navigation}>
-          {navigation.map((section) => (
+          {navigation
+          .filter(
+            (section) =>
+              section.label !== "MANAGEMENT" || user.role === "ADMIN"
+          )
+            .map((section) => (
             <div key={section.label} className={styles.navSection}>
               <p className={styles.sectionLabel}>{section.label}</p>
 
@@ -113,7 +151,13 @@ export default function WorkspaceShell({ children }) {
                     pathname === item.href ? styles.active : ""
                   }`}
                 >
-                  {item.name}
+                  <span>{item.name}</span>
+
+                  {item.href === "/notifications" && unreadCount > 0 && (
+                    <span className={styles.notificationBadge}>
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
                 </Link>
               ))}
             </div>

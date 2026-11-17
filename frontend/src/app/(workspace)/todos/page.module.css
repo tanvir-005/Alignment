@@ -1,0 +1,413 @@
+
+.page {
+  width: 100%;
+  color: #24241f;
+}
+
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 34px;
+}
+
+.eyebrow {
+  margin-bottom: 12px;
+  color: #85847c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.pageHeader h1 {
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.subtitle {
+  margin-top: 9px;
+  color: #85847c;
+  font-size: 13px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid #77785b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: #77785b;
+  color: #fff;
+}
+
+.primaryButton:hover {
+  background: #62634a;
+}
+
+.primaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  background: transparent;
+  border-color: #d6d5cd;
+  color: #55544d;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: #eeede8;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.createForm {
+  max-width: 680px;
+  margin-bottom: 32px;
+  padding: 24px;
+  border: 1px solid #deddd6;
+  background: #eeede8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.formHeader {
+  margin-bottom: 10px;
+}
+
+.formHeader h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.formHeader p {
+  margin-top: 5px;
+  color: #85847c;
+  font-size: 12px;
+}
+
+.createForm label {
+  margin-top: 8px;
+  color: #55544d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.createForm input,
+.createForm textarea,
+.controls input,
+.controls select {
+  width: 100%;
+  border: 1px solid #d6d5cd;
+  border-radius: 0;
+  background: #f9f8f5;
+  color: #24241f;
+  font: inherit;
+  font-size: 13px;
+}
+
+.createForm input,
+.createForm textarea {
+  padding: 11px 12px;
+}
+
+.createForm textarea {
+  resize: vertical;
+}
+
+.createForm input:focus,
+.createForm textarea:focus,
+.controls input:focus,
+.controls select:focus {
+  outline: 1px solid #77785b;
+  border-color: #77785b;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid #deddd6;
+}
+
+.filters,
+.controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.filterButton {
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #77766f;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.filterButton:hover {
+  color: #24241f;
+  background: #eeede8;
+}
+
+.filterActive {
+  border-color: #d6d5cd;
+  background: #eeede8;
+  color: #24241f;
+  font-weight: 600;
+}
+
+.controls input {
+  width: 190px;
+  padding: 9px 10px;
+}
+
+.controls select {
+  width: auto;
+  min-height: 35px;
+  padding: 0 9px;
+}
+
+.listHeader,
+.taskRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) 1fr 1fr 110px;
+  align-items: center;
+  gap: 18px;
+}
+
+.listHeader {
+  padding: 15px 14px;
+  color: #929087;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.taskList {
+  border-top: 1px solid #deddd6;
+}
+
+.taskRow {
+  min-height: 76px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #deddd6;
+  color: inherit;
+  transition: background 120ms ease;
+}
+
+.taskRow:hover {
+  background: #eeede8;
+}
+
+.taskInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.taskTitle {
+  overflow: hidden;
+  color: #24241f;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskMeta,
+.date,
+.muted {
+  color: #85847c;
+  font-size: 11px;
+}
+
+.status,
+.assignmentStatus {
+  display: inline-block;
+  padding: 5px 7px;
+  background: #eeede8;
+  color: #65645d;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.pending {
+  background: #eeede8;
+  color: #68675e;
+}
+
+.inprogress {
+  background: #e8e8dc;
+  color: #666746;
+}
+
+.completed {
+  background: #e5e9e1;
+  color: #53634e;
+}
+
+.assignmentStatus {
+  background: #e8e8dc;
+  color: #666746;
+}
+
+.emptyState {
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #85847c;
+  text-align: center;
+  font-size: 13px;
+}
+
+.emptyState h2 {
+  color: #24241f;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.emptyState p {
+  max-width: 320px;
+  line-height: 1.6;
+}
+
+.error,
+.errorPanel {
+  color: #a34438;
+  font-size: 12px;
+}
+
+.errorPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #d9b8b1;
+  margin-top: 20px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  padding-top: 24px;
+  color: #77766f;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .controls {
+    width: 100%;
+  }
+
+  .controls input {
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .listHeader,
+  .taskRow {
+    grid-template-columns: minmax(180px, 2fr) 1fr 1fr;
+  }
+
+  .listHeader > :last-child,
+  .taskRow > :last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .pageHeader {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 26px;
+  }
+
+  .pageHeader h1 {
+    font-size: 26px;
+  }
+
+  .pageHeader .primaryButton {
+    align-self: flex-start;
+  }
+
+  .filters {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .filterButton {
+    flex-shrink: 0;
+  }
+
+  .controls select {
+    flex: 1;
+  }
+
+  .listHeader {
+    display: none;
+  }
+
+  .taskRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 15px 10px;
+  }
+
+  .taskRow > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .taskRow > :nth-child(3) {
+    grid-column: 1;
+  }
+
+  .taskRow > :last-child {
+    display: none;
+  }
+
+  .createForm {
+    padding: 17px;
+  }
+}

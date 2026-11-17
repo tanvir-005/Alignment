@@ -1,0 +1,121 @@
+
+.panel {
+  padding: 24px;
+  border: 1px solid #deddd6;
+  background: #f9f8f5;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.header h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.header span {
+  color: #77785b;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.assigneeInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.assigneeInfo span,
+.description {
+  color: #85847c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.assigneeInfo strong {
+  color: #33332d;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.assignForm,
+.responseActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.assignForm label {
+  color: #55544d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.assignForm select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #d6d5cd;
+  border-radius: 0;
+  background: #fff;
+  color: #24241f;
+  font: inherit;
+  font-size: 12px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #77785b;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: #77785b;
+  color: white;
+}
+
+.secondaryButton {
+  background: transparent;
+  color: #55544d;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.responseActions {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.responseActions .description {
+  flex-basis: 100%;
+}
+
+.error,
+.success {
+  margin-top: 14px;
+  font-size: 11px;
+}
+
+.error {
+  color: #a34438;
+}
+
+.success {
+  color: #53634e;
+}
