@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Todo, Team, UserProfile
+from .models import Todo, Team, UserProfile, Notification
 
 
 class TodoSerializer(serializers.ModelSerializer):
@@ -137,3 +137,35 @@ class TodoAssignmentSerializer(serializers.Serializer):
     assignee = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(is_active=True)
     )
+
+class TodoAssignmentResponseSerializer(serializers.Serializer):
+    decision = serializers.ChoiceField(
+        choices=[
+            Todo.AssignmentStatus.ACCEPTED,
+            Todo.AssignmentStatus.REJECTED,
+        ]
+    )
+
+class NotificationSerializer(serializers.ModelSerializer):
+    actor = serializers.CharField(
+        source="actor.username",
+        read_only=True,
+        default=None,
+    )
+    todo_title = serializers.CharField(
+        source="todo.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "actor",
+            "todo",
+            "todo_title",
+            "message",
+            "is_read",
+            "created_at",
+        ]
+        read_only_fields = fields

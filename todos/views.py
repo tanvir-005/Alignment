@@ -11,7 +11,7 @@ from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 
 from .models import Todo, Team, UserProfile, Notification
-from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer, TodoAssignmentSerializer
+from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer, TodoAssignmentSerializer, TodoAssignmentResponseSerializer, NotificationSerializer  
 from .pagination import TodoPagination, PaginatedTodoSerializer
 from .auth_serializers import RegisterSerializer
 from .schema_serializers import RegisterResponseSerializer
@@ -379,3 +379,103 @@ class TodoAssignView(APIView):
             TodoSerializer(todo).data,
             status=status.HTTP_200_OK
         )
+
+class TodoRespondView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        todo = get_object_or_404(
+            Todo.objects.select_for_update(),
+            pk=pk,
+        )
+
+        if todo.assignee_id != request.user.id:
+            return Response(
+                {"detail": "Only the assigned user can respond."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if todo.assignment_status != Todo.AssignmentStatus.PENDING:
+            return Response(
+                {"detail": "This assignment is no longer pending."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = TodoAssignmentResponseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        decision = serializer.validated_data["decision"]
+
+        todo.assignment_status = decision
+        todo.save(update_fields=["assignment_status", "updated_at"])
+
+        Notification.objects.create(
+            recipient=todo.user,
+            actor=request.user,
+            todo=todo,
+            message=(
+                f"{request.user.username} "
+                f"{decision.lower()} your assignment: {todo.title}"
+            ),
+        )
+
+        return Response(TodoSerializer(todo).data)
+
+class NotificationListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        notifications = Notification.objects.filter(
+            recipient=request.user
+        ).select_related("actor", "todo")
+
+        serializer = NotificationSerializer(
+            notifications,
+            many=True,
+        )
+
+        return Response(serializer.data)
+
+
+class NotificationUnreadCountView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        count = Notification.objects.filter(
+            recipient=request.user,
+            is_read=False,
+        ).count()
+
+        return Response({"unread_count": count})
+
+
+class NotificationMarkReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        notification = get_object_or_404(
+            Notification,
+            pk=pk,
+            recipient=request.user,
+        )
+
+        notification.is_read = True
+        notification.save(update_fields=["is_read"])
+
+        return Response({"detail": "Notification marked as read."})
+
+
+class NotificationMarkAllReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        updated_count = Notification.objects.filter(
+            recipient=request.user,
+            is_read=False,
+        ).update(is_read=True)
+
+        return Response({
+            "detail": "All notifications marked as read.",
+            "updated_count": updated_count,
+        })

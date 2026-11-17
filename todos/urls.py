@@ -1,6 +1,20 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import TodoListCreateView, TodoDetailView, RegisterView, CurrentUserView, TeamListView, UserListView, UserDetailAdminView, TodoAssignView
+from .views import (
+    TodoListCreateView, 
+    TodoDetailView, 
+    RegisterView, 
+    CurrentUserView, 
+    TeamListView, 
+    UserListView, 
+    UserDetailAdminView, 
+    TodoAssignView, 
+    TodoRespondView,
+    NotificationListView,
+    NotificationUnreadCountView,
+    NotificationMarkReadView,
+    NotificationMarkAllReadView,
+)
 from .models import Todo, Team 
 
 urlpatterns = [
@@ -16,4 +30,10 @@ urlpatterns = [
     path("teams/", TeamListView.as_view(), name="team-list"),
     path("users/", UserListView.as_view(), name="user-list"),
     path("users/<int:pk>/", UserDetailAdminView.as_view(), name="user-detail-admin"),
+    path("todos/<int:pk>/respond/", TodoRespondView.as_view(),name="todo-respond"),
+
+    path("notifications/", NotificationListView.as_view(), name="notification-list"),
+    path("notifications/unread-count/", NotificationUnreadCountView.as_view(), name="notification-unread-count"),
+    path("notifications/<int:pk>/read/", NotificationMarkReadView.as_view(), name="notification-mark-read"),
+    path("notifications/read-all/", NotificationMarkAllReadView.as_view(), name="notification-mark-all-read"),
 ]
