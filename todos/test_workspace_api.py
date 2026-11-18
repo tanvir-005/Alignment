@@ -749,3 +749,52 @@ def test_admin_cannot_delete_todo(api_client, admin, todo):
 
     assert response.status_code == 403
     assert Todo.objects.filter(id=todo.id).exists()
+
+@pytest.mark.django_db
+def test_admin_can_search_workspace_todos(api_client, admin, todo, assigned_todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get("/api/admin/todos/?search=Workspace%20test&status=PENDING")
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["title"] == "Workspace test todo"
+    assert response.data["results"][0]["creator"] == "workspace_member"
+
+
+@pytest.mark.django_db
+def test_member_cannot_search_workspace_todos(api_client, member):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.get("/api/admin/todos/")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_admin_todo_explorer_rejects_invalid_status(api_client, admin):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get("/api/admin/todos/?status=NOT_A_STATUS")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_dashboard_includes_attention_and_activity_fields(api_client, admin, todo):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.get("/api/admin/dashboard/")
+
+    assert response.status_code == 200
+    assert response.data["attention"]["unassigned_todos"] == 1
+    assert "stale_todos" in response.data["attention"]
+    assert "inactive_users" in response.data["attention"]
+    member_activity = next(
+        item for item in response.data["users"]
+        if item["username"] == "workspace_member"
+    )
+    assert "last_login" in member_activity
+    assert "last_task_activity" in member_activity
+    assert "inactive_30_days" in member_activity
+    assert "active_todos_per_member" in response.data["teams"][0]

@@ -20,6 +20,14 @@ export default function AdminPage() {
   const [userTodos, setUserTodos] = useState([]);
   const [userTodosLoading, setUserTodosLoading] = useState(false);
   const [userTodosError, setUserTodosError] = useState("");
+  const [explorer, setExplorer] = useState({ results: [], count: 0 });
+  const [explorerSearch, setExplorerSearch] = useState("");
+  const [explorerStatus, setExplorerStatus] = useState("");
+  const [explorerTeam, setExplorerTeam] = useState("");
+  const [explorerUnassigned, setExplorerUnassigned] = useState(false);
+  const [explorerLoading, setExplorerLoading] = useState(false);
+  const [explorerError, setExplorerError] = useState("");
+  const [explorerPage, setExplorerPage] = useState(1);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -69,6 +77,13 @@ export default function AdminPage() {
       setUsers(userList);
       setTeams(teamList);
       setDashboard(dashboardData);
+
+      const explorerResponse = await fetch("/api/admin/todos/?limit=10", { cache: "no-store" });
+      const explorerData = await explorerResponse.json();
+      if (!explorerResponse.ok) {
+        throw new Error(explorerData.detail || explorerData.error || "Unable to load workspace todos.");
+      }
+      setExplorer(explorerData);
 
       const initialDrafts = {};
       userList.forEach((user) => {
@@ -155,6 +170,32 @@ export default function AdminPage() {
     }
   }
 
+  async function searchWorkspaceTodos(event, page = 1) {
+    event?.preventDefault();
+    setExplorerLoading(true);
+    setExplorerError("");
+
+    const params = new URLSearchParams({ limit: "10", page: String(page) });
+    if (explorerSearch.trim()) params.set("search", explorerSearch.trim());
+    if (explorerStatus) params.set("status", explorerStatus);
+    if (explorerTeam) params.set("team", explorerTeam);
+    if (explorerUnassigned) params.set("unassigned", "true");
+
+    try {
+      const response = await fetch(`/api/admin/todos/?${params.toString()}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || "Unable to search workspace todos.");
+      }
+      setExplorer(data);
+      setExplorerPage(page);
+    } catch (err) {
+      setExplorerError(err.message || "Unable to search workspace todos.");
+    } finally {
+      setExplorerLoading(false);
+    }
+  }
+
   const filteredUsers = users.filter((user) => {
     const query = search.toLowerCase();
     return [user.username, user.email, user.first_name, user.last_name]
@@ -222,6 +263,39 @@ export default function AdminPage() {
             ))}
           </div>
 
+          <section className={styles.panel}>
+            <div className={styles.panelHeading}>
+              <h3>Needs attention</h3>
+              <span>Items that may need administrative review</span>
+            </div>
+            <div className={styles.attentionGrid}>
+              <article className={styles.attentionMetric}>
+                <span>Unassigned incomplete todos</span>
+                <strong>{dashboard.attention.unassigned_todos}</strong>
+              </article>
+              <article className={styles.attentionMetric}>
+                <span>Stale todos · 7+ days</span>
+                <strong>{dashboard.attention.stale_todos}</strong>
+              </article>
+              <article className={styles.attentionMetric}>
+                <span>Users without task activity · 30 days</span>
+                <strong>{dashboard.attention.inactive_users}</strong>
+              </article>
+            </div>
+            {dashboard.attention.stale_todo_preview.length > 0 && (
+              <div className={styles.staleList}>
+                <strong>Oldest unchanged todos</strong>
+                {dashboard.attention.stale_todo_preview.map((todo) => (
+                  <Link href={`/todos/${todo.id}`} key={todo.id} className={styles.staleItem}>
+                    <span>{todo.title}</span>
+                    <small>{todo.team || "No team"} · {todo.task_status.replaceAll("_", " ").toLowerCase()} · Updated {new Date(todo.updated_at).toLocaleDateString()}</small>
+                  </Link>
+                ))}
+              </div>
+            )}
+            <p className={styles.muted}>Stale means an incomplete todo has not been updated for at least seven days. It does not necessarily mean the task is overdue.</p>
+          </section>
+
           <div className={styles.dashboardGrid}>
             <section className={styles.panel}>
               <div className={styles.panelHeading}>
@@ -256,11 +330,11 @@ export default function AdminPage() {
                 <div className={styles.teamRow} key={team.id}>
                   <div>
                     <strong>{team.name}</strong>
-                    <span>{team.members} members · {team.todos} todos</span>
+                    <span>{team.members} members · {team.active_todos} active · {team.todos} total</span>
                   </div>
                   <div className={styles.teamProgress}>
                     <strong>{team.completion_rate}%</strong>
-                    <span>{team.completed_todos}/{team.todos} completed</span>
+                    <span>{team.completed_todos}/{team.todos} completed · {team.active_todos_per_member} active/member</span>
                   </div>
                 </div>
               )) : <p className={styles.muted}>No teams available.</p>}
@@ -277,7 +351,7 @@ export default function AdminPage() {
                 <thead>
                   <tr>
                     <th>User</th><th>Team</th><th>Assigned</th><th>Completed</th>
-                    <th>Pending</th><th>Completion</th><th></th>
+                    <th>Pending</th><th>Completion</th><th>Last task activity</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -300,6 +374,10 @@ export default function AdminPage() {
                         </div>
                       </td>
                       <td>
+                        {item.last_task_activity ? new Date(item.last_task_activity).toLocaleDateString() : "No activity"}
+                        {item.inactive_30_days && <small className={styles.inactiveFlag}>Inactive 30d</small>}
+                      </td>
+                      <td>
                         <button
                           className={styles.textButton}
                           onClick={() => inspectUser(users.find((user) => user.id === item.id) || item)}
@@ -310,7 +388,7 @@ export default function AdminPage() {
                     </tr>
                   ))}
                   {!dashboard.users.length && (
-                    <tr><td colSpan={7} className={styles.empty}>No users available.</td></tr>
+                    <tr><td colSpan={8} className={styles.empty}>No users available.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -332,6 +410,57 @@ export default function AdminPage() {
                 ))}
               </div>
             ) : <p className={styles.muted}>No activity has been recorded yet.</p>}
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeading}>
+              <h3>Workspace todo explorer</h3>
+              <span>{explorer.count} matching todos · Read only</span>
+            </div>
+            <form className={styles.explorerFilters} onSubmit={searchWorkspaceTodos}>
+              <input
+                type="search"
+                value={explorerSearch}
+                onChange={(event) => setExplorerSearch(event.target.value)}
+                placeholder="Search title, description, user, or team"
+                aria-label="Search workspace todos"
+              />
+              <select value={explorerStatus} onChange={(event) => setExplorerStatus(event.target.value)} aria-label="Filter by todo status">
+                <option value="">All statuses</option>
+                <option value="PENDING">Pending</option>
+                <option value="IN_PROGRESS">In progress</option>
+                <option value="COMPLETED">Completed</option>
+              </select>
+              <select value={explorerTeam} onChange={(event) => setExplorerTeam(event.target.value)} aria-label="Filter by team">
+                <option value="">All teams</option>
+                {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+              <label className={styles.checkboxFilter}>
+                <input type="checkbox" checked={explorerUnassigned} onChange={(event) => setExplorerUnassigned(event.target.checked)} />
+                Unassigned only
+              </label>
+              <button type="submit" className={styles.saveButton} disabled={explorerLoading}>
+                {explorerLoading ? "Searching..." : "Apply filters"}
+              </button>
+            </form>
+            {explorerError && <p className={styles.errorText}>{explorerError}</p>}
+            <div className={styles.explorerList}>
+              {explorer.results.map((todo) => (
+                <Link href={`/todos/${todo.id}`} key={todo.id} className={styles.explorerItem}>
+                  <span>
+                    <strong>{todo.title}</strong>
+                    <small>{todo.team || "No team"} · Created by {todo.creator} · Assigned to {todo.assignee || "Nobody"}</small>
+                  </span>
+                  <span className={styles.todoStatus}>{todo.task_status.replaceAll("_", " ").toLowerCase()}</span>
+                </Link>
+              ))}
+              {!explorerLoading && explorer.results.length === 0 && <p className={styles.muted}>No todos match these filters.</p>}
+            </div>
+            <div className={styles.explorerPagination}>
+              <button type="button" className={styles.textButton} disabled={!explorer.previous || explorerLoading} onClick={() => searchWorkspaceTodos(null, explorerPage - 1)}>Previous</button>
+              <span>Page {explorerPage}</span>
+              <button type="button" className={styles.textButton} disabled={!explorer.next || explorerLoading} onClick={() => searchWorkspaceTodos(null, explorerPage + 1)}>Next</button>
+            </div>
           </section>
         </div>
       )}

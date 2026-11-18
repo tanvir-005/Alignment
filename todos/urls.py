@@ -16,6 +16,7 @@ from .views import (
     NotificationMarkAllReadView,
     AdminDashboardView,
     AdminUserTodosView,
+    AdminTodoExplorerView,
 )
 from .models import Todo, Team 
 
@@ -33,6 +34,7 @@ urlpatterns = [
     path("users/", UserListView.as_view(), name="user-list"),
     path("users/<int:pk>/", UserDetailAdminView.as_view(), name="user-detail-admin"),
     path("admin/dashboard/", AdminDashboardView.as_view(), name="admin-dashboard"),
+    path("admin/todos/", AdminTodoExplorerView.as_view(), name="admin-todo-explorer"),
     path("admin/users/<int:pk>/todos/", AdminUserTodosView.as_view(), name="admin-user-todos"),
     path("todos/<int:pk>/respond/", TodoRespondView.as_view(),name="todo-respond"),
 

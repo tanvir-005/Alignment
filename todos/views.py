@@ -1,7 +1,9 @@
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Max
+from django.utils import timezone
+from datetime import timedelta
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -541,6 +543,10 @@ class AdminDashboardView(APIView):
                 task_status=Todo.TaskStatus.COMPLETED
             ).count()
             created_count = Todo.objects.filter(user=user).count()
+            last_task_activity = Todo.objects.filter(
+                Q(user=user) | Q(assignee=user)
+            ).aggregate(last_activity=Max("updated_at"))["last_activity"]
+            inactivity_cutoff = timezone.now() - timedelta(days=30)
             user_activity.append({
                 "id": user.id,
                 "username": user.username,
@@ -560,6 +566,12 @@ class AdminDashboardView(APIView):
                 "completion_rate": round(
                     completed_count / assigned_count * 100
                 ) if assigned_count else 0,
+                "last_login": user.last_login,
+                "last_task_activity": last_task_activity,
+                "inactive_30_days": (
+                    last_task_activity is None
+                    or last_task_activity < inactivity_cutoff
+                ),
             })
 
         team_activity = []
@@ -569,17 +581,48 @@ class AdminDashboardView(APIView):
             team_completed = team_todos.filter(
                 task_status=Todo.TaskStatus.COMPLETED
             ).count()
+            team_member_count = team.members.count()
+            active_todos = team_todos.exclude(
+                task_status=Todo.TaskStatus.COMPLETED
+            ).count()
             team_activity.append({
                 "id": team.id,
                 "name": team.name,
-                "members": team.members.count(),
+                "members": team_member_count,
                 "todos": team_total,
+                "active_todos": active_todos,
+                "active_todos_per_member": round(
+                    active_todos / team_member_count, 1
+                ) if team_member_count else 0,
                 "completed_todos": team_completed,
                 "incomplete_todos": team_total - team_completed,
                 "completion_rate": round(
                     team_completed / team_total * 100
                 ) if team_total else 0,
             })
+
+        stale_cutoff = timezone.now() - timedelta(days=7)
+        stale_todos = todos.exclude(
+            task_status=Todo.TaskStatus.COMPLETED
+        ).filter(updated_at__lt=stale_cutoff).order_by("updated_at")[:10]
+        attention = {
+            "unassigned_todos": todos.filter(assignee__isnull=True).exclude(
+                task_status=Todo.TaskStatus.COMPLETED
+            ).count(),
+            "stale_todos": todos.exclude(
+                task_status=Todo.TaskStatus.COMPLETED
+            ).filter(updated_at__lt=stale_cutoff).count(),
+            "inactive_users": sum(1 for item in user_activity if item["inactive_30_days"]),
+            "stale_todo_preview": [{
+                "id": todo.id,
+                "title": todo.title,
+                "team": todo.team.name if todo.team else None,
+                "creator": todo.user.username,
+                "assignee": todo.assignee.username if todo.assignee else None,
+                "task_status": todo.task_status,
+                "updated_at": todo.updated_at,
+            } for todo in stale_todos],
+        }
 
         recent_activity = [{
             "id": notification.id,
@@ -612,6 +655,7 @@ class AdminDashboardView(APIView):
             },
             "teams": team_activity,
             "users": user_activity,
+            "attention": attention,
             "recent_activity": recent_activity,
         })
 
@@ -650,3 +694,90 @@ class AdminUserTodosView(APIView):
             "results": results,
             "count": len(results),
         })
+
+
+class AdminTodoExplorerView(APIView):
+    """Search and filter workspace todos without granting mutation access."""
+
+    permission_classes = [IsAuthenticated, IsAdminUserRole]
+
+    def get(self, request):
+        todos = Todo.objects.select_related(
+            "user", "assignee", "team"
+        ).all()
+
+        search = request.query_params.get("search", "").strip()
+        if search:
+            todos = todos.filter(
+                Q(title__icontains=search)
+                | Q(description__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(assignee__username__icontains=search)
+                | Q(team__name__icontains=search)
+            )
+
+        team_id = request.query_params.get("team")
+        if team_id:
+            if not team_id.isdigit():
+                return Response({"detail": "team must be a numeric team ID."}, status=400)
+            todos = todos.filter(team_id=int(team_id))
+
+        task_status = request.query_params.get("status")
+        valid_statuses = {value for value, _label in Todo.TaskStatus.choices}
+        if task_status:
+            normalized_status = task_status.upper()
+            if normalized_status not in valid_statuses:
+                return Response({"detail": "Invalid task status."}, status=400)
+            todos = todos.filter(task_status=normalized_status)
+
+        assignment_status = request.query_params.get("assignment_status")
+        valid_assignment_statuses = {
+            value for value, _label in Todo.AssignmentStatus.choices
+        }
+        if assignment_status:
+            normalized_assignment_status = assignment_status.upper()
+            if normalized_assignment_status not in valid_assignment_statuses:
+                return Response({"detail": "Invalid assignment status."}, status=400)
+            todos = todos.filter(assignment_status=normalized_assignment_status)
+
+        unassigned = request.query_params.get("unassigned")
+        if unassigned == "true":
+            todos = todos.filter(assignee__isnull=True)
+        elif unassigned not in (None, "", "false"):
+            return Response({"detail": "unassigned must be true or false."}, status=400)
+
+        creator_id = request.query_params.get("creator")
+        assignee_id = request.query_params.get("assignee")
+        for parameter, value in (("creator", creator_id), ("assignee", assignee_id)):
+            if value and not value.isdigit():
+                return Response({"detail": f"{parameter} must be a numeric user ID."}, status=400)
+        if creator_id:
+            todos = todos.filter(user_id=int(creator_id))
+        if assignee_id:
+            todos = todos.filter(assignee_id=int(assignee_id))
+
+        ordering = request.query_params.get("ordering", "-updated_at")
+        allowed_ordering = {"created_at", "-created_at", "updated_at", "-updated_at", "title", "-title"}
+        if ordering not in allowed_ordering:
+            return Response({"detail": "Invalid ordering."}, status=400)
+        todos = todos.order_by(ordering, "-id")
+
+        paginator = TodoPagination()
+        page = paginator.paginate_queryset(todos, request)
+        results = [{
+            "id": todo.id,
+            "title": todo.title,
+            "description": todo.description,
+            "creator": todo.user.username,
+            "creator_id": todo.user_id,
+            "assignee": todo.assignee.username if todo.assignee else None,
+            "assignee_id": todo.assignee_id,
+            "team": todo.team.name if todo.team else None,
+            "team_id": todo.team_id,
+            "task_status": todo.task_status,
+            "assignment_status": todo.assignment_status,
+            "created_at": todo.created_at,
+            "updated_at": todo.updated_at,
+        } for todo in page]
+
+        return paginator.get_paginated_response(results)
