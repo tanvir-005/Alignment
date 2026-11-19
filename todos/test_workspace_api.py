@@ -798,3 +798,168 @@ def test_dashboard_includes_attention_and_activity_fields(api_client, admin, tod
     assert "last_task_activity" in member_activity
     assert "inactive_30_days" in member_activity
     assert "active_todos_per_member" in response.data["teams"][0]
+
+# -------------------------------------------------------------------
+# Kanban status updates
+# -------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_creator_can_move_unassigned_todo_to_in_progress(
+    api_client, member, todo
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+
+    todo.refresh_from_db()
+    assert todo.task_status == Todo.TaskStatus.IN_PROGRESS
+    assert todo.is_completed is False
+
+
+@pytest.mark.django_db
+def test_creator_can_complete_unassigned_todo(
+    api_client, member, todo
+):
+    todo.task_status = Todo.TaskStatus.IN_PROGRESS
+    todo.save()
+
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "COMPLETED"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+
+    todo.refresh_from_db()
+    assert todo.task_status == Todo.TaskStatus.COMPLETED
+    assert todo.is_completed is True
+
+
+@pytest.mark.django_db
+def test_creator_cannot_move_assigned_todo(
+    api_client, member, assigned_todo
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{assigned_todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_assignee_cannot_move_pending_assignment(
+    api_client, another_member, assigned_todo
+):
+    api_client.force_authenticate(user=another_member)
+
+    response = api_client.patch(
+        f"/api/todos/{assigned_todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.django_db
+def test_assignee_can_move_accepted_assignment(
+    api_client, another_member, assigned_todo
+):
+    assigned_todo.assignment_status = Todo.AssignmentStatus.ACCEPTED
+    assigned_todo.save()
+
+    api_client.force_authenticate(user=another_member)
+
+    response = api_client.patch(
+        f"/api/todos/{assigned_todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+
+    assigned_todo.refresh_from_db()
+    assert assigned_todo.task_status == Todo.TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.django_db
+def test_admin_cannot_update_todo_status(
+    api_client, admin, todo
+):
+    api_client.force_authenticate(user=admin)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+    todo.refresh_from_db()
+    assert todo.task_status == Todo.TaskStatus.PENDING
+
+
+@pytest.mark.django_db
+def test_cannot_skip_kanban_status(
+    api_client, member, todo
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "COMPLETED"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+    todo.refresh_from_db()
+    assert todo.task_status == Todo.TaskStatus.PENDING
+
+
+@pytest.mark.django_db
+def test_cannot_move_beyond_completed(
+    api_client, member, todo
+):
+    todo.task_status = Todo.TaskStatus.COMPLETED
+    todo.is_completed = True
+    todo.save()
+
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "COMPLETED"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_unrelated_member_cannot_update_todo_status(
+    api_client, another_member, todo
+):
+    api_client.force_authenticate(user=another_member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 403

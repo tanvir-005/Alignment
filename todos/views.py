@@ -460,6 +460,101 @@ class TodoRespondView(APIView):
 
         return Response(TodoSerializer(todo).data)
 
+class TodoStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        todo = get_object_or_404(
+            Todo.objects.select_for_update(),
+            pk=pk,
+        )
+
+        # Administrators have read-only access.
+        if request.user.profile.role == UserProfile.Role.ADMIN:
+            return Response(
+                {
+                    "detail": (
+                        "Administrators have read-only access to todos."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Unassigned tasks can only be moved by their creator.
+        if todo.assignee_id is None:
+            if todo.user_id != request.user.id:
+                return Response(
+                    {"detail": "You cannot update this todo."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Assigned tasks can only be moved by the accepted assignee.
+        else:
+            if todo.assignee_id != request.user.id:
+                return Response(
+                    {
+                        "detail": (
+                            "Only the assigned user can update this todo."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if todo.assignment_status != Todo.AssignmentStatus.ACCEPTED:
+                return Response(
+                    {
+                        "detail": (
+                            "You must accept the assignment "
+                            "before changing its status."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        new_status = request.data.get("task_status")
+
+        # Only allow moving one step left or right.
+        allowed_transitions = {
+            Todo.TaskStatus.PENDING: [
+                Todo.TaskStatus.IN_PROGRESS,
+            ],
+            Todo.TaskStatus.IN_PROGRESS: [
+                Todo.TaskStatus.PENDING,
+                Todo.TaskStatus.COMPLETED,
+            ],
+            Todo.TaskStatus.COMPLETED: [
+                Todo.TaskStatus.IN_PROGRESS,
+            ],
+        }
+
+        if new_status not in allowed_transitions.get(todo.task_status, []):
+            return Response(
+                {
+                    "detail": "Invalid status transition.",
+                    "current_status": todo.task_status,
+                    "allowed_statuses": allowed_transitions.get(
+                        todo.task_status, []
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        todo.task_status = new_status
+        todo.is_completed = (
+            new_status == Todo.TaskStatus.COMPLETED
+        )
+
+        todo.save(
+            update_fields=[
+                "task_status",
+                "is_completed",
+                "updated_at",
+            ]
+        )
+
+        return Response(TodoSerializer(todo).data)
+
 class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 

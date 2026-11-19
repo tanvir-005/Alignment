@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import styles from "./WorkspaceShell.module.css";
-
-const navigation = [
+  
+  const navigation = [
   {
     label: "WORKSPACE",
     items: [
       { name: "My tasks", href: "/todos" },
+      { name: "Kanban", href: "/kanban" },
       { name: "Notifications", href: "/notifications" },
     ],
   },

@@ -17,6 +17,7 @@ from .views import (
     AdminDashboardView,
     AdminUserTodosView,
     AdminTodoExplorerView,
+    TodoStatusUpdateView,
 )
 from .models import Todo, Team 
 
@@ -24,6 +25,7 @@ urlpatterns = [
     path('todos/', TodoListCreateView.as_view(), name='todo-list-create'),
     path('todos/<int:pk>/', TodoDetailView.as_view(), name='todo-detail'),
     path("todos/<int:pk>/assign/", TodoAssignView.as_view(), name="todo-assign"),
+    path("todos/<int:pk>/status/", TodoStatusUpdateView.as_view(), name="todo-status-update"),
 
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', TokenObtainPairView.as_view(), name='token-obtain-pair'),
