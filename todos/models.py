@@ -126,3 +126,50 @@ class Notification(models.Model):
 
     def __str__(self):
         return self.message
+
+
+class TodoActivity(models.Model):
+    class EventType(models.TextChoices):
+        CREATED = "CREATED", "Created"
+        UPDATED = "UPDATED", "Updated"
+        ASSIGNED = "ASSIGNED", "Assigned"
+        ASSIGNMENT_ACCEPTED = (
+            "ASSIGNMENT_ACCEPTED",
+            "Assignment accepted",
+        )
+        ASSIGNMENT_REJECTED = (
+            "ASSIGNMENT_REJECTED",
+            "Assignment rejected",
+        )
+        STATUS_CHANGED = "STATUS_CHANGED", "Status changed"
+
+    todo = models.ForeignKey(
+        Todo,
+        on_delete=models.CASCADE,
+        related_name="activities",
+    )
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="todo_activities",
+    )
+
+    event_type = models.CharField(
+        max_length=32,
+        choices=EventType.choices,
+    )
+
+    description = models.CharField(max_length=255)
+
+    metadata = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.event_type}: {self.todo_id}"

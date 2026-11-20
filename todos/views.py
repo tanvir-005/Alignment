@@ -12,11 +12,22 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 
-from .models import Todo, Team, UserProfile, Notification
-from .serializers import TodoSerializer, TeamSerializer, UserListSerializer, UserAdminUpdateSerializer, TodoAssignmentSerializer, TodoAssignmentResponseSerializer, NotificationSerializer  
+from .models import Todo, Team, UserProfile, Notification, TodoActivity
 from .pagination import TodoPagination, PaginatedTodoSerializer
 from .auth_serializers import RegisterSerializer
 from .schema_serializers import RegisterResponseSerializer
+from .services.activity_service import record_todo_activity
+
+from .serializers import (
+    TodoSerializer,
+    TeamSerializer,
+    UserListSerializer,
+    UserAdminUpdateSerializer,
+    TodoAssignmentSerializer,
+    TodoAssignmentResponseSerializer,
+    NotificationSerializer,
+    TodoActivitySerializer,
+)
 
 class TodoListCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -112,6 +123,7 @@ class TodoListCreateView(APIView):
         request=TodoSerializer,
         responses={201: TodoSerializer}
     )
+    @transaction.atomic
     def post(self, request):
         if request.user.profile.role == UserProfile.Role.ADMIN:
             return Response(
@@ -122,16 +134,25 @@ class TodoListCreateView(APIView):
         serializer = TodoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        serializer.save(
+        todo = serializer.save(
             user=request.user,
-            team=request.user.profile.team
+            team=request.user.profile.team,
+        )
+
+        record_todo_activity(
+            todo=todo,
+            actor=request.user,
+            event_type=TodoActivity.EventType.CREATED,
+            description=f"{request.user.username} created this task.",
+            metadata={
+                "task_status": todo.task_status,
+            },
         )
 
         return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED
+            TodoSerializer(todo).data,
+            status=status.HTTP_201_CREATED,
         )
-
 
 class TodoDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -164,39 +185,72 @@ class TodoDetailView(APIView):
 
         return Response(serializer.data)
 
-    def put(self, request, pk):
+    @transaction.atomic
+    def _update_todo(self, request, pk, partial=False):
         todo = self.get_object(pk)
 
         if not self.can_edit(todo, request.user):
             return Response(
                 {"error": "You do not have permission to edit this todo."},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = TodoSerializer(todo, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-
-        return Response(serializer.data)
-
-    def patch(self, request, pk):
-        todo = self.get_object(pk)
-
-        if not self.can_edit(todo, request.user):
+        if "task_status" in request.data:
             return Response(
-                {"error": "You do not have permission to edit this todo."},
-                status=status.HTTP_403_FORBIDDEN
+                {
+                    "detail": (
+                        "Use the dedicated status endpoint "
+                        "to change task status."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        old_values = {
+            "title": todo.title,
+            "description": todo.description,
+        }
 
         serializer = TodoSerializer(
             todo,
             data=request.data,
-            partial=True
+            partial=partial,
         )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        updated_todo = serializer.save()
 
-        return Response(serializer.data)
+        new_values = {
+            "title": updated_todo.title,
+            "description": updated_todo.description,
+        }
+
+        changes = {
+            field: {
+                "old": old_values[field],
+                "new": new_values[field],
+            }
+            for field in old_values
+            if old_values[field] != new_values[field]
+        }
+
+        if changes:
+            record_todo_activity(
+                todo=updated_todo,
+                actor=request.user,
+                event_type=TodoActivity.EventType.UPDATED,
+                description=(
+                    f"{request.user.username} updated this task."
+                ),
+                metadata={"changes": changes},
+            )
+
+        return Response(TodoSerializer(updated_todo).data)
+
+    def put(self, request, pk):
+        return self._update_todo(request, pk, partial=False)
+
+    def patch(self, request, pk):
+        return self._update_todo(request, pk, partial=True)
 
     def delete(self, request, pk):
         todo = self.get_object(pk)
@@ -355,6 +409,7 @@ class UserDetailAdminView(APIView):
 class TodoAssignView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         if request.user.profile.role == UserProfile.Role.ADMIN:
             return Response(
@@ -362,18 +417,21 @@ class TodoAssignView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        todo = get_object_or_404(Todo, pk=pk)
+        todo = get_object_or_404(
+            Todo.objects.select_for_update(),
+            pk=pk,
+        )
 
         if todo.user_id != request.user.id:
             return Response(
                 {"error": "Only the creator can assign this todo."},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         if todo.assignee_id is not None:
             return Response(
                 {"error": "This todo is already assigned."},
-                status=status.HTTP_409_CONFLICT
+                status=status.HTTP_409_CONFLICT,
             )
 
         serializer = TodoAssignmentSerializer(data=request.data)
@@ -384,7 +442,7 @@ class TodoAssignView(APIView):
         if assignee.id == request.user.id:
             return Response(
                 {"error": "You cannot assign a todo to yourself."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if (
@@ -393,24 +451,48 @@ class TodoAssignView(APIView):
         ):
             return Response(
                 {"error": "Assignee must belong to the same team."},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         todo.assignee = assignee
         todo.assignment_status = Todo.AssignmentStatus.PENDING
-        todo.save(update_fields=["assignee", "assignment_status", "updated_at"])
+        todo.save(
+            update_fields=[
+                "assignee",
+                "assignment_status",
+                "updated_at",
+            ]
+        )
+
+        record_todo_activity(
+            todo=todo,
+            actor=request.user,
+            event_type=TodoActivity.EventType.ASSIGNED,
+            description=(
+                f"{request.user.username} assigned this task "
+                f"to {assignee.username}."
+            ),
+            metadata={
+                "assignee_id": assignee.id,
+                "assignee_username": assignee.username,
+                "assignment_status": todo.assignment_status,
+            },
+        )
 
         Notification.objects.create(
             recipient=assignee,
             actor=request.user,
             todo=todo,
-            message=f"{request.user.username} assigned you a todo: {todo.title}",
+            message=(
+                f"{request.user.username} assigned you a todo: "
+                f"{todo.title}"
+            ),
         )
 
         return Response(
             TodoSerializer(todo).data,
-            status=status.HTTP_200_OK
-        )
+            status=status.HTTP_200_OK,
+        )    
 
 class TodoRespondView(APIView):
     permission_classes = [IsAuthenticated]
@@ -447,6 +529,25 @@ class TodoRespondView(APIView):
 
         todo.assignment_status = decision
         todo.save(update_fields=["assignment_status", "updated_at"])
+
+        event_type = (
+            TodoActivity.EventType.ASSIGNMENT_ACCEPTED
+            if decision == Todo.AssignmentStatus.ACCEPTED
+            else TodoActivity.EventType.ASSIGNMENT_REJECTED
+        )
+
+        record_todo_activity(
+            todo=todo,
+            actor=request.user,
+            event_type=event_type,
+            description=(
+                f"{request.user.username} "
+                f"{decision.lower()} the assignment."
+            ),
+            metadata={
+                "assignment_status": decision,
+            },
+        )
 
         Notification.objects.create(
             recipient=todo.user,
@@ -540,6 +641,8 @@ class TodoStatusUpdateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_status = todo.task_status
+
         todo.task_status = new_status
         todo.is_completed = (
             new_status == Todo.TaskStatus.COMPLETED
@@ -551,6 +654,21 @@ class TodoStatusUpdateView(APIView):
                 "is_completed",
                 "updated_at",
             ]
+        )
+
+        record_todo_activity(
+            todo=todo,
+            actor=request.user,
+            event_type=TodoActivity.EventType.STATUS_CHANGED,
+            description=(
+                f"{request.user.username} changed status "
+                f"from {old_status.replace('_', ' ').title()} "
+                f"to {new_status.replace('_', ' ').title()}."
+            ),
+            metadata={
+                "old_status": old_status,
+                "new_status": new_status,
+            },
         )
 
         return Response(TodoSerializer(todo).data)
@@ -876,3 +994,34 @@ class AdminTodoExplorerView(APIView):
         } for todo in page]
 
         return paginator.get_paginated_response(results)
+
+
+
+class TodoActivityListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        # Members can see activities for tasks they created
+        # or tasks assigned to them. Admins can inspect all tasks.
+        visible_todos = Todo.objects.all()
+
+        if request.user.profile.role != UserProfile.Role.ADMIN:
+            visible_todos = visible_todos.filter(
+                Q(user=request.user) | Q(assignee=request.user)
+            )
+
+        todo = get_object_or_404(visible_todos, pk=pk)
+
+        activities = (
+            TodoActivity.objects
+            .filter(todo=todo)
+            .select_related("actor")
+            .order_by("-created_at", "-id")
+        )
+
+        paginator = TodoPagination()
+        page = paginator.paginate_queryset(activities, request)
+
+        serializer = TodoActivitySerializer(page, many=True)
+
+        return paginator.get_paginated_response(serializer.data)

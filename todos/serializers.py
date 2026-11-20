@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import Todo, Team, UserProfile, Notification
-
+from .models import Todo, Team, UserProfile, Notification, TodoActivity
 
 class TodoSerializer(serializers.ModelSerializer):
     creator = serializers.IntegerField(
@@ -173,3 +172,30 @@ class NotificationSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class TodoActivitySerializer(serializers.ModelSerializer):
+    actor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TodoActivity
+        fields = [
+            "id",
+            "event_type",
+            "description",
+            "metadata",
+            "actor",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_actor(self, obj):
+        if obj.actor is None:
+            return None
+
+        return {
+            "id": obj.actor_id,
+            "username": obj.actor.username,
+            "first_name": obj.actor.first_name,
+            "last_name": obj.actor.last_name,
+        }

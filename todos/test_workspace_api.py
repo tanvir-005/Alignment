@@ -4,7 +4,7 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from todos.models import Team, UserProfile, Todo, Notification
+from todos.models import Team, UserProfile, Todo, Notification, TodoActivity
 
 
 # -------------------------------------------------------------------
@@ -963,3 +963,195 @@ def test_unrelated_member_cannot_update_todo_status(
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_creator_can_view_todo_activities(api_client, member, todo):
+    api_client.force_authenticate(user=member)
+
+    TodoActivity.objects.create(
+        todo=todo,
+        actor=member,
+        event_type=TodoActivity.EventType.CREATED,
+        description="Task created.",
+        metadata={"task_status": "PENDING"},
+    )
+
+    response = api_client.get(
+        f"/api/todos/{todo.id}/activities/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["event_type"] == "CREATED"
+    assert response.data["results"][0]["actor"]["username"] == member.username
+
+
+@pytest.mark.django_db
+def test_assignee_can_view_todo_activities(
+    api_client, another_member, assigned_todo
+):
+    api_client.force_authenticate(user=another_member)
+
+    TodoActivity.objects.create(
+        todo=assigned_todo,
+        actor=assigned_todo.user,
+        event_type=TodoActivity.EventType.ASSIGNED,
+        description="Task assigned.",
+    )
+
+    response = api_client.get(
+        f"/api/todos/{assigned_todo.id}/activities/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+
+
+@pytest.mark.django_db
+def test_unrelated_member_cannot_view_todo_activities(
+    api_client, other_team_member, todo
+):
+    api_client.force_authenticate(user=other_team_member)
+
+    response = api_client.get(
+        f"/api/todos/{todo.id}/activities/"
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_admin_can_view_any_todo_activities(
+    api_client, admin, todo
+):
+    api_client.force_authenticate(user=admin)
+
+    TodoActivity.objects.create(
+        todo=todo,
+        actor=todo.user,
+        event_type=TodoActivity.EventType.CREATED,
+        description="Task created.",
+    )
+
+    response = api_client.get(
+        f"/api/todos/{todo.id}/activities/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["count"] == 1
+
+
+@pytest.mark.django_db
+def test_activity_endpoint_requires_authentication(
+    api_client, todo
+):
+    response = api_client.get(
+        f"/api/todos/{todo.id}/activities/"
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_activity_endpoint_returns_empty_list(
+    api_client, member, todo
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.get(
+        f"/api/todos/{todo.id}/activities/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["count"] == 0
+    assert response.data["results"] == []
+
+@pytest.mark.django_db
+def test_creating_todo_records_activity(api_client, member):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.post(
+        "/api/todos/",
+        {
+            "title": "New test task",
+            "description": "Testing activity creation",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+
+    todo_id = response.data["id"]
+
+    activity = TodoActivity.objects.get(
+        todo_id=todo_id,
+        event_type=TodoActivity.EventType.CREATED,
+    )
+
+    assert activity.actor == member
+
+
+@pytest.mark.django_db
+def test_updating_todo_records_activity(api_client, member, todo):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/",
+        {"title": "Updated task title"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+
+    activity = TodoActivity.objects.get(
+        todo=todo,
+        event_type=TodoActivity.EventType.UPDATED,
+    )
+
+    assert activity.actor == member
+    assert "title" in activity.metadata["changes"]
+
+
+@pytest.mark.django_db
+def test_status_change_records_activity(api_client, member, todo):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/status/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+
+    activity = TodoActivity.objects.get(
+        todo=todo,
+        event_type=TodoActivity.EventType.STATUS_CHANGED,
+    )
+
+    assert activity.metadata["old_status"] == "PENDING"
+    assert activity.metadata["new_status"] == "IN_PROGRESS"
+
+
+@pytest.mark.django_db
+def test_detail_endpoint_rejects_status_update(
+    api_client, member, todo
+):
+    api_client.force_authenticate(user=member)
+
+    response = api_client.patch(
+        f"/api/todos/{todo.id}/",
+        {"task_status": "IN_PROGRESS"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+    todo.refresh_from_db()
+    assert todo.task_status == Todo.TaskStatus.PENDING
+
+    assert not TodoActivity.objects.filter(
+        todo=todo,
+        event_type=TodoActivity.EventType.STATUS_CHANGED,
+    ).exists()
