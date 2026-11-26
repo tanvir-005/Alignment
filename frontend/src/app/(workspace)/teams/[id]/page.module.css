@@ -1,0 +1,10 @@
+.hero { background: var(--surface); border: 1px solid var(--border); border-left: 6px solid var(--team); border-radius: var(--r-lg); padding: 18px 22px; margin-bottom: 22px; display: flex; gap: 20px; align-items: center; justify-content: space-between; flex-wrap: wrap; box-shadow: var(--shadow-sm); }
+.hero h1 { font-size: 22px; display: flex; align-items: center; gap: 10px; }
+.hero p { color: var(--text-2); margin-top: 4px; }
+.facts { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 12px; }
+.fact span { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.fact b { font-size: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.counts { display: flex; gap: 10px; }
+.count { min-width: 84px; text-align: center; padding: 8px 12px; border-radius: var(--r); background: color-mix(in srgb, var(--c) 10%, var(--surface)); border-top: 3px solid var(--c); }
+.count b { display: block; font-size: 22px; color: var(--c); line-height: 1.15; }
+.count span { font-size: 11.5px; color: var(--text-2); }

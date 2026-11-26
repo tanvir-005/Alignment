@@ -1,0 +1,14 @@
+{% extends "email/base.html" %}
+{% block content %}
+<p style="margin:0 0 12px;">Hi {{ recipient_name }},</p>
+<p style="margin:0 0 16px;"><b>{{ actor_name }}</b> assigned you a task in <b>{{ team_name }}</b>.</p>
+<h2 style="margin:0 0 8px;font-size:18px;">{{ title }}</h2>
+{% if description %}<p style="margin:0 0 14px;white-space:pre-wrap;color:#49526e;">{{ description }}</p>{% endif %}
+<table role="presentation" cellspacing="0" cellpadding="4" style="font-size:13px;margin-bottom:18px;">
+  <tr><td style="color:#7a849f;">Priority</td><td><b>{{ priority }}</b></td></tr>
+  <tr><td style="color:#7a849f;">Due</td><td><b>{{ due_date }}</b></td></tr>
+  <tr><td style="color:#7a849f;">Assigned to</td><td>{{ assignees }}</td></tr>
+  <tr><td style="color:#7a849f;">Project manager</td><td>{{ pm_name }}</td></tr>
+</table>
+<a href="{{ url }}" style="display:inline-block;background:#3946d6;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:5px;font-weight:600;">Open task</a>
+{% endblock %}

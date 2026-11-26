@@ -1,0 +1,1363 @@
+openapi: 3.0.3
+info:
+  title: Teamboard API
+  version: 1.0.0
+  description: 'Team-based task management: admin-managed teams, one PM per team,
+    assignee-driven status.'
+paths:
+  /api/admin/overview/:
+    get:
+      operationId: admin_overview_retrieve
+      tags:
+      - admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/login/:
+    post:
+      operationId: auth_login_create
+      description: |-
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailOrUsernameToken'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EmailOrUsernameToken'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EmailOrUsernameToken'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailOrUsernameToken'
+          description: ''
+  /api/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      tags:
+      - auth
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/auth/refresh/:
+    post:
+      operationId: auth_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/auth/register/:
+    post:
+      operationId: register_user
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Register'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Register'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Register'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/notifications/:
+    get:
+      operationId: notifications_list
+      parameters:
+      - in: query
+        name: unread
+        schema:
+          type: boolean
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/notifications/{id}/read/:
+    patch:
+      operationId: notifications_read_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/notifications/read-all/:
+    patch:
+      operationId: notifications_read_all_partial_update
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkAllRead'
+          description: ''
+  /api/notifications/unread-count/:
+    get:
+      operationId: notifications_unread_count_retrieve
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCount'
+          description: ''
+  /api/schema/:
+    get:
+      operationId: schema_retrieve
+      description: |-
+        OpenApi3 schema for this API. Format can be selected via content negotiation.
+
+        - YAML: application/vnd.oai.openapi
+        - JSON: application/vnd.oai.openapi+json
+      parameters:
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - json
+          - yaml
+      - in: query
+        name: lang
+        schema:
+          type: string
+          enum:
+          - af
+          - ar
+          - ar-dz
+          - ast
+          - az
+          - be
+          - bg
+          - bn
+          - br
+          - bs
+          - ca
+          - ckb
+          - cs
+          - cy
+          - da
+          - de
+          - dsb
+          - el
+          - en
+          - en-au
+          - en-gb
+          - eo
+          - es
+          - es-ar
+          - es-co
+          - es-mx
+          - es-ni
+          - es-ve
+          - et
+          - eu
+          - fa
+          - fi
+          - fr
+          - fy
+          - ga
+          - gd
+          - gl
+          - he
+          - hi
+          - hr
+          - hsb
+          - hu
+          - hy
+          - ia
+          - id
+          - ig
+          - io
+          - is
+          - it
+          - ja
+          - ka
+          - kab
+          - kk
+          - km
+          - kn
+          - ko
+          - ky
+          - lb
+          - lt
+          - lv
+          - mk
+          - ml
+          - mn
+          - mr
+          - ms
+          - my
+          - nb
+          - ne
+          - nl
+          - nn
+          - os
+          - pa
+          - pl
+          - pt
+          - pt-br
+          - ro
+          - ru
+          - sk
+          - sl
+          - sq
+          - sr
+          - sr-latn
+          - sv
+          - sw
+          - ta
+          - te
+          - tg
+          - th
+          - tk
+          - tr
+          - tt
+          - udm
+          - ug
+          - uk
+          - ur
+          - uz
+          - vi
+          - zh-hans
+          - zh-hant
+      tags:
+      - schema
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/vnd.oai.openapi:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/yaml:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/vnd.oai.openapi+json:
+              schema:
+                type: object
+                additionalProperties: {}
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/teams/:
+    get:
+      operationId: teams_list
+      tags:
+      - teams
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Team'
+          description: ''
+    post:
+      operationId: teams_create
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TeamWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TeamWrite'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+          description: ''
+  /api/teams/{id}/:
+    get:
+      operationId: teams_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+          description: ''
+    patch:
+      operationId: teams_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTeamWrite'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+          description: ''
+    delete:
+      operationId: teams_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/teams/{id}/members/:
+    post:
+      operationId: teams_members_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMembers'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AddMembers'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AddMembers'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+          description: ''
+  /api/teams/{id}/members/{user_id}/:
+    delete:
+      operationId: teams_members_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/teams/{id}/members/{user_id}/impact/:
+    get:
+      operationId: teams_members_impact_retrieve
+      description: What removing this member would do - shown in the confirmation
+        dialog.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberImpact'
+          description: ''
+  /api/teams/{id}/replace-pm/:
+    post:
+      operationId: teams_replace_pm_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - teams
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplacePM'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReplacePM'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReplacePM'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamDetail'
+          description: ''
+  /api/todos/:
+    get:
+      operationId: todos_list
+      parameters:
+      - in: query
+        name: assignee
+        schema:
+          type: integer
+      - in: query
+        name: ordering
+        schema:
+          type: string
+          enum:
+          - due
+          - newest
+          - oldest
+          - priority
+          - updated
+      - in: query
+        name: priority
+        schema:
+          type: string
+      - in: query
+        name: scope
+        schema:
+          type: string
+          enum:
+          - actionable
+          - all
+          - mine
+          - other
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+      - in: query
+        name: team
+        schema:
+          type: integer
+      tags:
+      - todos
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Todo'
+          description: ''
+    post:
+      operationId: todos_create
+      tags:
+      - todos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TodoCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TodoCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+          description: ''
+  /api/todos/{id}/:
+    get:
+      operationId: todos_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - todos
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+          description: ''
+    patch:
+      operationId: todos_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - todos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+          description: ''
+    delete:
+      operationId: todos_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - todos
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/todos/{id}/activities/:
+    get:
+      operationId: todos_activities_list
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - todos
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TodoActivity'
+          description: ''
+  /api/todos/{id}/status/:
+    patch:
+      operationId: todos_status_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - todos
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoStatus'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoStatus'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTodoStatus'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+          description: ''
+  /api/users/:
+    get:
+      operationId: users_list
+      parameters:
+      - in: query
+        name: active
+        schema:
+          type: boolean
+      - in: query
+        name: exclude_team
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: unassigned
+        schema:
+          type: boolean
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/users/{id}/activate/:
+    post:
+      operationId: users_activate_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+  /api/users/{id}/deactivate/:
+    post:
+      operationId: users_deactivate_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - users
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+          description: ''
+components:
+  schemas:
+    AddMembers:
+      type: object
+      properties:
+        user_ids:
+          type: array
+          items:
+            type: integer
+      required:
+      - user_ids
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          title: Email address
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        role:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          title: Active
+          description: Designates whether this user should be treated as active. Unselect
+            this instead of deleting accounts.
+        date_joined:
+          type: string
+          format: date-time
+        memberships:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - id
+      - memberships
+      - name
+      - role
+    Color94fEnum:
+      enum:
+      - blue
+      - teal
+      - green
+      - amber
+      - orange
+      - rose
+      - violet
+      - slate
+      type: string
+      description: |-
+        * `blue` - Blue
+        * `teal` - Teal
+        * `green` - Green
+        * `amber` - Amber
+        * `orange` - Orange
+        * `rose` - Rose
+        * `violet` - Violet
+        * `slate` - Slate
+    EmailOrUsernameToken:
+      type: object
+      description: Lets people sign in with their email address (or username).
+      properties:
+        username:
+          type: string
+          writeOnly: true
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+      - username
+    EventTypeEnum:
+      enum:
+      - CREATED
+      - UPDATED
+      - ASSIGNEES_CHANGED
+      - STATUS_CHANGED
+      type: string
+      description: |-
+        * `CREATED` - Created
+        * `UPDATED` - Updated
+        * `ASSIGNEES_CHANGED` - Assignees changed
+        * `STATUS_CHANGED` - Status changed
+    MarkAllRead:
+      type: object
+      properties:
+        updated:
+          type: integer
+      required:
+      - updated
+    MemberImpact:
+      type: object
+      properties:
+        is_pm:
+          type: boolean
+        assigned:
+          type: integer
+        to_delete:
+          type: integer
+      required:
+      - assigned
+      - is_pm
+      - to_delete
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        message:
+          type: string
+          maxLength: 255
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        todo_id:
+          type: integer
+          nullable: true
+          readOnly: true
+        team_id:
+          type: integer
+          nullable: true
+          readOnly: true
+        actor_name:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - actor_name
+      - created_at
+      - id
+      - message
+      - team_id
+      - todo_id
+    OldPmActionEnum:
+      enum:
+      - member
+      - remove
+      type: string
+      description: |-
+        * `member` - member
+        * `remove` - remove
+    PatchedTeamWrite:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          default: ''
+        color:
+          $ref: '#/components/schemas/TeamWriteColorEnum'
+        pm_id:
+          type: integer
+    PatchedTodoStatus:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+    PatchedTodoUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        assignee_ids:
+          type: array
+          items:
+            type: integer
+        all_members:
+          type: boolean
+          default: false
+    PriorityEnum:
+      enum:
+      - LOW
+      - MEDIUM
+      - HIGH
+      type: string
+      description: |-
+        * `LOW` - Low
+        * `MEDIUM` - Medium
+        * `HIGH` - High
+    Register:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - email
+      - name
+      - password
+    ReplacePM:
+      type: object
+      properties:
+        pm_id:
+          type: integer
+        old_pm_action:
+          allOf:
+          - $ref: '#/components/schemas/OldPmActionEnum'
+          default: member
+      required:
+      - pm_id
+    StatusEnum:
+      enum:
+      - PENDING
+      - IN_PROGRESS
+      - COMPLETED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `IN_PROGRESS` - In progress
+        * `COMPLETED` - Completed
+    Team:
+      type: object
+      description: Expects a queryset from selectors.annotated_teams().
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          $ref: '#/components/schemas/Color94fEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        pm:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        member_count:
+          type: integer
+          readOnly: true
+        todo_counts:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        my_role:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - member_count
+      - my_role
+      - name
+      - pm
+      - todo_counts
+    TeamBrief:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        color:
+          $ref: '#/components/schemas/Color94fEnum'
+      required:
+      - id
+      - name
+    TeamDetail:
+      type: object
+      description: Expects a queryset from selectors.annotated_teams().
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        color:
+          $ref: '#/components/schemas/Color94fEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        pm:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        member_count:
+          type: integer
+          readOnly: true
+        todo_counts:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        my_role:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        members:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - member_count
+      - members
+      - my_role
+      - name
+      - pm
+      - todo_counts
+    TeamWrite:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          default: ''
+        color:
+          $ref: '#/components/schemas/TeamWriteColorEnum'
+        pm_id:
+          type: integer
+      required:
+      - name
+    TeamWriteColorEnum:
+      enum:
+      - blue
+      - teal
+      - green
+      - amber
+      - orange
+      - rose
+      - violet
+      - slate
+      type: string
+      description: |-
+        * `blue` - blue
+        * `teal` - teal
+        * `green` - green
+        * `amber` - amber
+        * `orange` - orange
+        * `rose` - rose
+        * `violet` - violet
+        * `slate` - slate
+    Todo:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        priority:
+          $ref: '#/components/schemas/PriorityEnum'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        is_overdue:
+          type: string
+          readOnly: true
+        team:
+          allOf:
+          - $ref: '#/components/schemas/TeamBrief'
+          readOnly: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/UserBrief'
+          readOnly: true
+        assignees:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        can_change_status:
+          type: string
+          readOnly: true
+        can_edit:
+          type: string
+          readOnly: true
+        is_assignee:
+          type: string
+          readOnly: true
+      required:
+      - assignees
+      - can_change_status
+      - can_edit
+      - created_at
+      - created_by
+      - id
+      - is_assignee
+      - is_overdue
+      - team
+      - title
+      - updated_at
+    TodoActivity:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        description:
+          type: string
+          maxLength: 255
+        metadata: {}
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/UserBrief'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor
+      - created_at
+      - description
+      - event_type
+      - id
+    TodoCreate:
+      type: object
+      properties:
+        team_id:
+          type: integer
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          default: ''
+        priority:
+          allOf:
+          - $ref: '#/components/schemas/PriorityEnum'
+          default: MEDIUM
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        assignee_ids:
+          type: array
+          items:
+            type: integer
+        all_members:
+          type: boolean
+          default: false
+      required:
+      - team_id
+      - title
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+          writeOnly: true
+      required:
+      - access
+      - refresh
+    UnreadCount:
+      type: object
+      properties:
+        unread_count:
+          type: integer
+      required:
+      - unread_count
+    UserBrief:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          title: Email address
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+      required:
+      - id
+      - name
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

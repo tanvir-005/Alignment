@@ -1,0 +1,10 @@
+.list { list-style: none; margin: 0; padding: 0; }
+.item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.item:last-child { border-bottom: none; }
+.item:hover { background: var(--surface-2); }
+.unread { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); }
+.pip { width: 8px; height: 8px; border-radius: 2px; background: var(--primary); margin-top: 7px; flex: none; }
+.read .pip { background: transparent; }
+.msg { flex: 1; min-width: 0; }
+.msg p { color: var(--text); }
+.msg small { color: var(--text-3); font-size: 12px; }

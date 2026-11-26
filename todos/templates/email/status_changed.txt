@@ -1,0 +1,11 @@
+Hi {{ recipient_name }},
+
+{{ actor_name }} changed the status of a task in {{ team_name }}.
+
+{{ title }}
+{{ old_status }} -> {{ new_status }}
+
+Assignees: {{ assignees }}
+Changed {{ when }}
+
+Open the task: {{ url }}

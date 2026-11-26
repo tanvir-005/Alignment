@@ -1,0 +1,13 @@
+{% extends "email/base.html" %}
+{% block content %}
+<p style="margin:0 0 12px;">Hi {{ recipient_name }},</p>
+<p style="margin:0 0 16px;"><b>{{ actor_name }}</b> changed the status of a task in <b>{{ team_name }}</b>.</p>
+<h2 style="margin:0 0 10px;font-size:18px;">{{ title }}</h2>
+<p style="margin:0 0 16px;font-size:15px;">
+  <span style="background:#eef0f7;padding:3px 9px;border-radius:3px;">{{ old_status }}</span>
+  &nbsp;→&nbsp;
+  <span style="background:{{ status_color }};color:#fff;padding:3px 9px;border-radius:3px;font-weight:600;">{{ new_status }}</span>
+</p>
+<p style="margin:0 0 18px;color:#49526e;font-size:13px;">Assignees: {{ assignees }}<br>Changed {{ when }}</p>
+<a href="{{ url }}" style="display:inline-block;background:#3946d6;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:5px;font-weight:600;">Open task</a>
+{% endblock %}
