@@ -1,41 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import styles from "./page.module.css";
+import { useRouter } from "next/navigation";
+import styles from "../auth.module.css";
 
 export default function LoginPage() {
   const router = useRouter();
-
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(event) {
+  async function submit(event) {
     event.preventDefault();
-
     setError("");
     setLoading(true);
-
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-
       const data = await response.json();
-
       if (!response.ok) {
-        setError(data.error || "Unable to sign in. Please try again.");
+        setError(data.error || "Unable to sign in.");
         return;
       }
-
-      router.replace("/todos");
+      router.replace("/");
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
@@ -45,99 +37,32 @@ export default function LoginPage() {
   }
 
   return (
-    <main className={styles.page}>
-      <header className={styles.header}>
-        <Link href="/login" className={styles.brand}>
-          TODO WORKSPACE
-        </Link>
+    <div className={styles.card}>
+      <h2>Sign in</h2>
+      <p className={styles.sub}>Welcome back. Use your work email.</p>
 
-        <span className={styles.headerLabel}>
-          PERSONAL PRODUCTIVITY
-        </span>
-      </header>
+      <form onSubmit={submit}>
+        {error && <div className="error-note" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
 
-      <section className={styles.content}>
-        <div className={styles.intro}>
-          <span className={styles.eyebrow}>YOUR WORKSPACE</span>
-
-          <h1>
-            Get things
-            <br />
-            done.
-          </h1>
-
-          <p>
-            A shared space to organize tasks,
-            <br className={styles.desktopBreak} />
-            manage work, and stay focused.
-          </p>
+        <div className="field">
+          <label className="label" htmlFor="email">Email</label>
+          <input id="email" className="input" type="text" autoComplete="username" required
+            value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="password">Password</label>
+          <input id="password" className="input" type="password" autoComplete="current-password" required
+            value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
 
-        <div className={styles.formSection}>
-          <div className={styles.formHeading}>
-            <h2>Welcome back</h2>
-            <p>Enter your credentials to continue.</p>
-          </div>
+        <button className="btn btn-primary" style={{ width: "100%", height: 38 }} disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
+        </button>
+      </form>
 
-          <form onSubmit={handleSubmit} className={styles.form}>
-            <div className={styles.field}>
-              <label htmlFor="username">Username</label>
-
-              <input
-                id="username"
-                name="username"
-                type="text"
-                placeholder="Enter your username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="password">Password</label>
-
-              <input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                required
-                disabled={loading}
-              />
-            </div>
-
-            {error && (
-              <p className={styles.error} role="alert">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className={styles.submitButton}
-              disabled={loading}
-            >
-              {loading ? "Signing in..." : "Sign in"}
-            </button>
-          </form>
-
-          <p className={styles.register}>
-            Don&apos;t have an account?{" "}  
-            <Link href="/register">Create an account</Link>
-          </p>
-        </div>
-      </section>
-
-      <footer className={styles.footer}>
-        <span>TODO WORKSPACE</span>
-        <span>© 2026</span>
-      </footer>
-    </main>
+      <p className={styles.footer}>
+        New here? <Link href="/register">Create an account</Link>
+      </p>
+    </div>
   );
 }

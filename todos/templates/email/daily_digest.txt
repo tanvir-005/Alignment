@@ -1,0 +1,16 @@
+Hi {{ recipient_name }},
+
+Here is what changed in {{ team_name }} in the last {{ hours }} hours ({{ window }}).
+
+{% for label, value in counts %}{{ label }}: {{ value }}
+{% endfor %}
+{% for task in tasks %}* {{ task.title }}  ({{ task.url }})
+{% for e in task.events %}    {{ e.time }}  {{ e.text }}
+{% endfor %}{% endfor %}{% if more_tasks %}...and {{ more_tasks }} more task(s).
+{% endif %}{% if deleted %}
+Deleted:
+{% for d in deleted %}    {{ d.time }}  {{ d.text }}
+{% endfor %}{% endif %}
+Team right now: {{ now_pending }} pending, {{ now_progress }} in progress, {{ now_done }} completed{% if overdue %}, {{ overdue }} overdue{% endif %}.
+
+Open the team: {{ url }}

@@ -1,1027 +1,604 @@
+from django.contrib.auth import get_user_model
+from django.db.models import Case, Count, IntegerField, Q, Value, When, Exists, OuterRef
 from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
-from django.db import transaction
-from django.db.models import Q, Count, Max
 from django.utils import timezone
-from datetime import timedelta
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
-from drf_spectacular.utils import extend_schema
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Todo, Team, UserProfile, Notification, TodoActivity
-from .pagination import TodoPagination, PaginatedTodoSerializer
-from .auth_serializers import RegisterSerializer
-from .schema_serializers import RegisterResponseSerializer
-from .services.activity_service import record_todo_activity
-
-from .serializers import (
-    TodoSerializer,
-    TeamSerializer,
-    UserListSerializer,
-    UserAdminUpdateSerializer,
-    TodoAssignmentSerializer,
-    TodoAssignmentResponseSerializer,
-    NotificationSerializer,
-    TodoActivitySerializer,
+from .auth_serializers import EmailOrUsernameTokenSerializer, RegisterSerializer
+from .models import (
+    Notification,
+    Team,
+    TeamMembership,
+    Todo,
+    TodoActivity,
+    TodoAssignment,
 )
+from .pagination import DefaultPagination, TodoPagination
+from .permissions import IsAdminRole, can_view_team, is_admin, member_team_ids, pm_team_ids
+from .selectors import (
+    actionable_q,
+    annotated_teams,
+    assigned_to,
+    teams_visible_to,
+    todos_visible_to,
+    unassigned_users,
+)
+from .serializers import (
+    AddMembersSerializer,
+    AdminUserSerializer,
+    NotificationSerializer,
+    ReplacePMSerializer,
+    TeamDetailSerializer,
+    TeamSerializer,
+    TeamWriteSerializer,
+    TodoActivitySerializer,
+    TodoCreateSerializer,
+    TodoSerializer,
+    TodoStatusSerializer,
+    TodoUpdateSerializer,
+)
+from .services import team_service, todo_service
+from .utils.names import display_name
 
-class TodoListCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+User = get_user_model()
 
-    @extend_schema(
-        operation_id='todo_list',
-        responses=PaginatedTodoSerializer
-    )
-    def get(self, request):
-        todos = Todo.objects.filter(
-            Q(user=request.user) | Q(assignee=request.user)
-        ).select_related(
-            "user", "assignee", "team"
-        ).distinct()
 
-        # Filter by task status
-        todo_status = request.query_params.get('status')
+# ======================================================================= auth
+class LoginView(TokenObtainPairView):
+    serializer_class = EmailOrUsernameTokenSerializer
 
-        status_mapping = {
-            "pending": Todo.TaskStatus.PENDING,
-            "in_progress": Todo.TaskStatus.IN_PROGRESS,
-            "completed": Todo.TaskStatus.COMPLETED,
-        }
-
-        if todo_status is not None:
-            if todo_status not in status_mapping:
-                return Response(
-                    {
-                        "error": (
-                            "Invalid status parameter. "
-                            "Must be pending, in_progress, or completed."
-                        ),
-                        "code": status.HTTP_400_BAD_REQUEST
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            todos = todos.filter(
-                task_status=status_mapping[todo_status]
-            )
-
-        # Search TODOs by title
-        search_query = request.query_params.get('search')
-
-        if search_query:
-            todos = todos.filter(
-                title__icontains=search_query.strip()
-            )
-
-        # Sorting
-        sort_by = request.query_params.get('sort_by', 'created_at')
-        order = request.query_params.get('order', 'desc')
-
-        allowed_sort_fields = ['created_at', 'title']
-        allowed_orders = ['asc', 'desc']
-
-        if sort_by not in allowed_sort_fields:
-            return Response(
-                {
-                    "error": (
-                        "Invalid sorting field. "
-                        "Allowed values: created_at, title."
-                    ),
-                    "code": status.HTTP_400_BAD_REQUEST
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if order not in allowed_orders:
-            return Response(
-                {
-                    "error": (
-                        "Invalid sorting order. "
-                        "Allowed values: asc, desc."
-                    ),
-                    "code": status.HTTP_400_BAD_REQUEST
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        ordering = sort_by if order == 'asc' else f'-{sort_by}'
-        todos = todos.order_by(ordering, '-id')
-
-        # Pagination
-        paginator = TodoPagination()
-        paginated_todos = paginator.paginate_queryset(todos, request)
-
-        serializer = TodoSerializer(paginated_todos, many=True)
-
-        return paginator.get_paginated_response(serializer.data)
-
-    @extend_schema(
-        request=TodoSerializer,
-        responses={201: TodoSerializer}
-    )
-    @transaction.atomic
-    def post(self, request):
-        if request.user.profile.role == UserProfile.Role.ADMIN:
-            return Response(
-                {"detail": "Administrators have read-only todo access."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        serializer = TodoSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        todo = serializer.save(
-            user=request.user,
-            team=request.user.profile.team,
-        )
-
-        record_todo_activity(
-            todo=todo,
-            actor=request.user,
-            event_type=TodoActivity.EventType.CREATED,
-            description=f"{request.user.username} created this task.",
-            metadata={
-                "task_status": todo.task_status,
-            },
-        )
-
-        return Response(
-            TodoSerializer(todo).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-class TodoDetailView(APIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = TodoSerializer
-
-    def get_object(self, pk):
-        visibility = Q(user=self.request.user) | Q(assignee=self.request.user)
-        if self.request.user.profile.role == UserProfile.Role.ADMIN:
-            visibility = Q()
-
-        return get_object_or_404(
-            Todo.objects.select_related(
-                "user", "assignee", "team"
-            ).filter(visibility),
-            pk=pk
-        )
-
-    def can_edit(self, todo, user):
-        if user.profile.role == UserProfile.Role.ADMIN:
-            return False
-
-        if todo.assignee_id is None:
-            return todo.user_id == user.id
-
-        return todo.assignee_id == user.id
-
-    def get(self, request, pk):
-        todo = self.get_object(pk)
-        serializer = TodoSerializer(todo)
-
-        return Response(serializer.data)
-
-    @transaction.atomic
-    def _update_todo(self, request, pk, partial=False):
-        todo = self.get_object(pk)
-
-        if not self.can_edit(todo, request.user):
-            return Response(
-                {"error": "You do not have permission to edit this todo."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if "task_status" in request.data:
-            return Response(
-                {
-                    "detail": (
-                        "Use the dedicated status endpoint "
-                        "to change task status."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        old_values = {
-            "title": todo.title,
-            "description": todo.description,
-        }
-
-        serializer = TodoSerializer(
-            todo,
-            data=request.data,
-            partial=partial,
-        )
-        serializer.is_valid(raise_exception=True)
-        updated_todo = serializer.save()
-
-        new_values = {
-            "title": updated_todo.title,
-            "description": updated_todo.description,
-        }
-
-        changes = {
-            field: {
-                "old": old_values[field],
-                "new": new_values[field],
-            }
-            for field in old_values
-            if old_values[field] != new_values[field]
-        }
-
-        if changes:
-            record_todo_activity(
-                todo=updated_todo,
-                actor=request.user,
-                event_type=TodoActivity.EventType.UPDATED,
-                description=(
-                    f"{request.user.username} updated this task."
-                ),
-                metadata={"changes": changes},
-            )
-
-        return Response(TodoSerializer(updated_todo).data)
-
-    def put(self, request, pk):
-        return self._update_todo(request, pk, partial=False)
-
-    def patch(self, request, pk):
-        return self._update_todo(request, pk, partial=True)
-
-    def delete(self, request, pk):
-        todo = self.get_object(pk)
-
-        if (
-            request.user.profile.role == UserProfile.Role.ADMIN
-            or todo.assignee_id is not None
-            or todo.user_id != request.user.id
-        ):
-            return Response(
-                {"error": "You do not have permission to delete this todo."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        todo.delete()
-
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class RegisterView(APIView):
     permission_classes = []
     authentication_classes = []
 
-    @extend_schema(
-        operation_id='register_user',
-        request=RegisterSerializer,
-        responses={201: RegisterResponseSerializer}
-    )
+    @extend_schema(request=RegisterSerializer, responses={201: OpenApiTypes.OBJECT}, operation_id="register_user")
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-
         return Response(
             {
-                "message": "User registered successfully.",
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                }
+                "message": "Account created. An administrator will add you to a team.",
+                "user": {"id": user.id, "name": display_name(user), "email": user.email},
             },
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_201_CREATED,
         )
+
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(responses=OpenApiTypes.OBJECT)
     def get(self, request):
         user = request.user
-        profile = user.profile
-
-        team = None
-        if profile.team:
-            team = {
-                "id": profile.team.id,
-                "name": profile.team.name,
-            }
-
-        return Response({
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "role": profile.role,
-            "team": team,
-        })
-
-class TeamListView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        teams = Team.objects.prefetch_related(
-            "members__user"
-        ).all()
-
-        serializer = TeamSerializer(teams, many=True)
-        return Response(serializer.data)
-
-class IsAdminUserRole:
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.profile.role == "ADMIN"
+        admin = is_admin(user)
+        memberships = (
+            []
+            if admin
+            else user.team_memberships.select_related("team").order_by("team__name")
         )
-
-class UserListView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
-
-    def get(self, request):
-        users = User.objects.select_related(
-            "profile__team"
-        ).annotate(
-            created_todo_count=Count("todos", distinct=True),
-            assigned_todo_count=Count("assigned_todos", distinct=True),
-        ).order_by("id")
-
-        serializer = UserListSerializer(users, many=True)
-        return Response(serializer.data)
-
-class UserDetailAdminView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
-
-    def patch(self, request, pk):
-        user = get_object_or_404(
-            User.objects.select_related("profile"),
-            pk=pk
-        )
-
-        serializer = UserAdminUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        updates = serializer.validated_data
-        profile = user.profile
-
-        if "role" in updates:
-            new_role = updates["role"]
-
-            if user.id == request.user.id:
-                return Response(
-                    {"error": "You cannot change your own role."},
-                    status=status.HTTP_403_FORBIDDEN
-                )
-
-            if (
-                profile.role == UserProfile.Role.ADMIN
-                and new_role == UserProfile.Role.MEMBER
-            ):
-                admin_count = UserProfile.objects.filter(
-                    role=UserProfile.Role.ADMIN
-                ).count()
-
-                if admin_count <= 1:
-                    return Response(
-                        {"error": "Cannot demote the last admin."},
-                        status=status.HTTP_409_CONFLICT
-                    )
-
-            profile.role = new_role
-
-        if "team" in updates:
-            profile.team = updates["team"]
-
-        profile.save()
-
-        user = User.objects.select_related(
-            "profile__team"
-        ).annotate(
-            created_todo_count=Count("todos", distinct=True),
-            assigned_todo_count=Count("assigned_todos", distinct=True),
-        ).get(pk=user.pk)
-
-        return Response(UserListSerializer(user).data)
-
-class TodoAssignView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        if request.user.profile.role == UserProfile.Role.ADMIN:
-            return Response(
-                {"detail": "Administrators have read-only todo access."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        todo = get_object_or_404(
-            Todo.objects.select_for_update(),
-            pk=pk,
-        )
-
-        if todo.user_id != request.user.id:
-            return Response(
-                {"error": "Only the creator can assign this todo."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if todo.assignee_id is not None:
-            return Response(
-                {"error": "This todo is already assigned."},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        serializer = TodoAssignmentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        assignee = serializer.validated_data["assignee"]
-
-        if assignee.id == request.user.id:
-            return Response(
-                {"error": "You cannot assign a todo to yourself."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if (
-            todo.team_id is None
-            or assignee.profile.team_id != todo.team_id
-        ):
-            return Response(
-                {"error": "Assignee must belong to the same team."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        todo.assignee = assignee
-        todo.assignment_status = Todo.AssignmentStatus.PENDING
-        todo.save(
-            update_fields=[
-                "assignee",
-                "assignment_status",
-                "updated_at",
-            ]
-        )
-
-        record_todo_activity(
-            todo=todo,
-            actor=request.user,
-            event_type=TodoActivity.EventType.ASSIGNED,
-            description=(
-                f"{request.user.username} assigned this task "
-                f"to {assignee.username}."
-            ),
-            metadata={
-                "assignee_id": assignee.id,
-                "assignee_username": assignee.username,
-                "assignment_status": todo.assignment_status,
-            },
-        )
-
-        Notification.objects.create(
-            recipient=assignee,
-            actor=request.user,
-            todo=todo,
-            message=(
-                f"{request.user.username} assigned you a todo: "
-                f"{todo.title}"
-            ),
-        )
-
         return Response(
-            TodoSerializer(todo).data,
-            status=status.HTTP_200_OK,
-        )    
-
-class TodoRespondView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @transaction.atomic
-    def post(self, request, pk):
-        if request.user.profile.role == UserProfile.Role.ADMIN:
-            return Response(
-                {"detail": "Administrators have read-only todo access."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        todo = get_object_or_404(
-            Todo.objects.select_for_update(),
-            pk=pk,
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "name": display_name(user),
+                "role": "ADMIN" if admin else "USER",
+                "is_admin": admin,
+                "memberships": [
+                    {
+                        "team": {"id": m.team_id, "name": m.team.name, "color": m.team.color},
+                        "role": m.role,
+                    }
+                    for m in memberships
+                ],
+                "pm_team_ids": sorted(pm_team_ids(user)) if not admin else [],
+                "has_team": admin or bool(memberships),
+            }
         )
 
-        if todo.assignee_id != request.user.id:
-            return Response(
-                {"detail": "Only the assigned user can respond."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
-        if todo.assignment_status != Todo.AssignmentStatus.PENDING:
-            return Response(
-                {"detail": "This assignment is no longer pending."},
-                status=status.HTTP_409_CONFLICT,
-            )
+# ======================================================================= teams
+def _team_response(request, team_id, *, status_code=200):
+    team = get_object_or_404(annotated_teams(Team.objects.filter(pk=team_id)))
+    open_tasks = dict(
+        TodoAssignment.objects.filter(todo__team=team)
+        .exclude(todo__status=Todo.Status.COMPLETED)
+        .values_list("user_id")
+        .annotate(n=Count("id"))
+    )
+    data = TeamDetailSerializer(
+        team, context={"request": request, "open_tasks": open_tasks}
+    ).data
+    return Response(data, status=status_code)
 
-        serializer = TodoAssignmentResponseSerializer(data=request.data)
+
+class TeamListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses=TeamSerializer(many=True))
+    def get(self, request):
+        teams = annotated_teams(teams_visible_to(request.user))
+        return Response(TeamSerializer(teams, many=True, context={"request": request}).data)
+
+    @extend_schema(request=TeamWriteSerializer, responses=TeamDetailSerializer)
+    def post(self, request):
+        if not is_admin(request.user):
+            self.permission_denied(request, message="Only administrators can create teams.")
+        serializer = TeamWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        decision = serializer.validated_data["decision"]
-
-        todo.assignment_status = decision
-        todo.save(update_fields=["assignment_status", "updated_at"])
-
-        event_type = (
-            TodoActivity.EventType.ASSIGNMENT_ACCEPTED
-            if decision == Todo.AssignmentStatus.ACCEPTED
-            else TodoActivity.EventType.ASSIGNMENT_REJECTED
-        )
-
-        record_todo_activity(
-            todo=todo,
+        data = serializer.validated_data
+        if "pm_id" not in data:
+            raise ValidationError({"pm_id": "Every team needs a project manager."})
+        pm = get_object_or_404(User, pk=data["pm_id"])
+        team = team_service.create_team(
             actor=request.user,
-            event_type=event_type,
-            description=(
-                f"{request.user.username} "
-                f"{decision.lower()} the assignment."
-            ),
-            metadata={
-                "assignment_status": decision,
-            },
+            name=data["name"],
+            description=data.get("description", ""),
+            color=data.get("color"),
+            pm=pm,
         )
+        return _team_response(request, team.id, status_code=status.HTTP_201_CREATED)
 
-        Notification.objects.create(
-            recipient=todo.user,
-            actor=request.user,
-            todo=todo,
-            message=(
-                f"{request.user.username} "
-                f"{decision.lower()} your assignment: {todo.title}"
-            ),
-        )
 
-        return Response(TodoSerializer(todo).data)
-
-class TodoStatusUpdateView(APIView):
+class TeamDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
-    @transaction.atomic
+    def _team(self, request, pk):
+        team = get_object_or_404(Team, pk=pk)
+        if not can_view_team(request.user, team.id):
+            # Do not reveal teams a user does not belong to.
+            from django.http import Http404
+            raise Http404
+        return team
+
+    @extend_schema(responses=TeamDetailSerializer)
+    def get(self, request, pk):
+        team = self._team(request, pk)
+        return _team_response(request, team.id)
+
+    @extend_schema(request=TeamWriteSerializer, responses=TeamDetailSerializer)
     def patch(self, request, pk):
-        todo = get_object_or_404(
-            Todo.objects.select_for_update(),
-            pk=pk,
-        )
+        if not is_admin(request.user):
+            self.permission_denied(request, message="Only administrators can edit teams.")
+        team = get_object_or_404(Team, pk=pk)
+        serializer = TeamWriteSerializer(team, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        data.pop("pm_id", None)  # PM changes go through replace-pm
+        team_service.update_team(team=team, **data)
+        return _team_response(request, team.id)
 
-        # Administrators have read-only access.
-        if request.user.profile.role == UserProfile.Role.ADMIN:
-            return Response(
-                {
-                    "detail": (
-                        "Administrators have read-only access to todos."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
+    def delete(self, request, pk):
+        if not is_admin(request.user):
+            self.permission_denied(request, message="Only administrators can delete teams.")
+        team = get_object_or_404(Team, pk=pk)
+        team_service.delete_team(actor=request.user, team=team)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
-        # Unassigned tasks can only be moved by their creator.
-        if todo.assignee_id is None:
-            if todo.user_id != request.user.id:
-                return Response(
-                    {"detail": "You cannot update this todo."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
 
-        # Assigned tasks can only be moved by the accepted assignee.
-        else:
-            if todo.assignee_id != request.user.id:
-                return Response(
-                    {
-                        "detail": (
-                            "Only the assigned user can update this todo."
-                        )
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+class TeamMembersView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
 
-            if todo.assignment_status != Todo.AssignmentStatus.ACCEPTED:
-                return Response(
-                    {
-                        "detail": (
-                            "You must accept the assignment "
-                            "before changing its status."
-                        )
-                    },
-                    status=status.HTTP_409_CONFLICT,
-                )
+    @extend_schema(request=AddMembersSerializer, responses=TeamDetailSerializer)
+    def post(self, request, pk):
+        team = get_object_or_404(Team, pk=pk)
+        serializer = AddMembersSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ids = set(serializer.validated_data["user_ids"])
+        users = list(User.objects.filter(id__in=ids))
+        if len(users) != len(ids):
+            raise ValidationError({"user_ids": "One or more users do not exist."})
+        team_service.add_members(actor=request.user, team=team, users=users)
+        return _team_response(request, team.id)
 
-        new_status = request.data.get("task_status")
 
-        # Only allow moving one step left or right.
-        allowed_transitions = {
-            Todo.TaskStatus.PENDING: [
-                Todo.TaskStatus.IN_PROGRESS,
-            ],
-            Todo.TaskStatus.IN_PROGRESS: [
-                Todo.TaskStatus.PENDING,
-                Todo.TaskStatus.COMPLETED,
-            ],
-            Todo.TaskStatus.COMPLETED: [
-                Todo.TaskStatus.IN_PROGRESS,
-            ],
-        }
+class TeamMemberDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
 
-        if new_status not in allowed_transitions.get(todo.task_status, []):
-            return Response(
-                {
-                    "detail": "Invalid status transition.",
-                    "current_status": todo.task_status,
-                    "allowed_statuses": allowed_transitions.get(
-                        todo.task_status, []
-                    ),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        old_status = todo.task_status
-
-        todo.task_status = new_status
-        todo.is_completed = (
-            new_status == Todo.TaskStatus.COMPLETED
-        )
-
-        todo.save(
-            update_fields=[
-                "task_status",
-                "is_completed",
-                "updated_at",
-            ]
-        )
-
-        record_todo_activity(
-            todo=todo,
-            actor=request.user,
-            event_type=TodoActivity.EventType.STATUS_CHANGED,
-            description=(
-                f"{request.user.username} changed status "
-                f"from {old_status.replace('_', ' ').title()} "
-                f"to {new_status.replace('_', ' ').title()}."
-            ),
-            metadata={
-                "old_status": old_status,
-                "new_status": new_status,
+    @extend_schema(
+        responses=inline_serializer(
+            "RemoveMemberResult",
+            {
+                "assigned": serializers.IntegerField(),
+                "deleted_todos": serializers.IntegerField(),
             },
         )
+    )
+    def delete(self, request, pk, user_id):
+        team = get_object_or_404(Team, pk=pk)
+        user = get_object_or_404(User, pk=user_id)
+        result = team_service.remove_member(actor=request.user, team=team, user=user)
+        return Response(result)
 
-        return Response(TodoSerializer(todo).data)
 
+class TeamMemberImpactView(APIView):
+    """What removing this member would do - shown in the confirmation dialog."""
+
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    @extend_schema(
+        responses=inline_serializer(
+            "MemberImpact",
+            {
+                "is_pm": serializers.BooleanField(),
+                "assigned": serializers.IntegerField(),
+                "to_delete": serializers.IntegerField(),
+            },
+        )
+    )
+    def get(self, request, pk, user_id):
+        team = get_object_or_404(Team, pk=pk)
+        membership = get_object_or_404(TeamMembership, team=team, user_id=user_id)
+        impact = team_service.removal_impact(team=team, user=membership.user)
+        return Response(
+            {
+                "is_pm": membership.role == TeamMembership.Role.PM,
+                "assigned": impact["assigned"],
+                "to_delete": impact["to_delete"],
+            }
+        )
+
+
+class TeamReplacePMView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    @extend_schema(request=ReplacePMSerializer, responses=TeamDetailSerializer)
+    def post(self, request, pk):
+        team = get_object_or_404(Team, pk=pk)
+        serializer = ReplacePMSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_pm = get_object_or_404(User, pk=serializer.validated_data["pm_id"])
+        team_service.replace_pm(
+            actor=request.user,
+            team=team,
+            new_pm=new_pm,
+            old_pm_action=serializer.validated_data["old_pm_action"],
+        )
+        return _team_response(request, team.id)
+
+
+# ======================================================================= users (admin)
+class UserListView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("search", str),
+            OpenApiParameter("unassigned", bool),
+            OpenApiParameter("active", bool),
+            OpenApiParameter("exclude_team", int),
+        ],
+        responses=AdminUserSerializer(many=True),
+    )
+    def get(self, request):
+        p = request.query_params
+        qs = (
+            User.objects.exclude(profile__role="ADMIN")
+            .exclude(is_superuser=True)
+            .prefetch_related("team_memberships__team")
+            .order_by("first_name", "last_name", "username")
+        )
+        if p.get("active") in ("true", "false"):
+            qs = qs.filter(is_active=(p["active"] == "true"))
+        if p.get("unassigned") == "true":
+            qs = qs.filter(is_active=True, team_memberships__isnull=True)
+        if p.get("exclude_team", "").isdigit():
+            qs = qs.exclude(team_memberships__team_id=int(p["exclude_team"]))
+        search = p.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(email__icontains=search)
+                | Q(username__icontains=search)
+            )
+        paginator = DefaultPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(AdminUserSerializer(page, many=True).data)
+
+
+class UserActivationView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    activate = False
+
+    @extend_schema(request=None, responses=AdminUserSerializer)
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        if self.activate:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+        else:
+            team_service.deactivate_user(actor=request.user, user=user)
+        user = User.objects.prefetch_related("team_memberships__team").get(pk=pk)
+        return Response(AdminUserSerializer(user).data)
+
+
+# ======================================================================= todos
+PRIORITY_ORDER = Case(
+    When(priority=Todo.Priority.HIGH, then=Value(0)),
+    When(priority=Todo.Priority.MEDIUM, then=Value(1)),
+    default=Value(2),
+    output_field=IntegerField(),
+)
+
+ORDERINGS = {
+    "newest": ("-created_at", "-id"),
+    "oldest": ("created_at", "id"),
+    "updated": ("-updated_at", "-id"),
+    "due": ("due_date_null", "due_date", "-id"),
+    "priority": ("priority_rank", "-id"),
+}
+
+
+def _todo_ctx(request):
+    return {"request": request}
+
+
+class TodoListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("scope", str, enum=["all", "actionable", "mine", "other"]),
+            OpenApiParameter("team", int),
+            OpenApiParameter("status", str),
+            OpenApiParameter("priority", str),
+            OpenApiParameter("assignee", int),
+            OpenApiParameter("search", str),
+            OpenApiParameter("ordering", str, enum=list(ORDERINGS)),
+        ],
+        responses=TodoSerializer(many=True),
+    )
+    def get(self, request):
+        user, p = request.user, request.query_params
+        qs = todos_visible_to(user)
+
+        scope = p.get("scope", "all")
+        if scope == "actionable":
+            qs = qs.none() if is_admin(user) else qs.filter(actionable_q(user))
+        elif scope == "mine":
+            qs = qs.none() if is_admin(user) else qs.filter(assigned_to(user))
+        elif scope == "other":
+            qs = qs if is_admin(user) else qs.exclude(actionable_q(user))
+
+        if p.get("team", "").isdigit():
+            qs = qs.filter(team_id=int(p["team"]))
+        if p.get("status") in Todo.Status.values:
+            qs = qs.filter(status=p["status"])
+        if p.get("priority") in Todo.Priority.values:
+            qs = qs.filter(priority=p["priority"])
+        if p.get("assignee", "").isdigit():
+            qs = qs.filter(
+                Exists(
+                    TodoAssignment.objects.filter(
+                        todo=OuterRef("pk"), user_id=int(p["assignee"])
+                    )
+                )
+            )
+        search = p.get("search", "").strip()
+        if search:
+            qs = qs.filter(Q(title__icontains=search) | Q(description__icontains=search))
+
+        ordering = p.get("ordering", "newest")
+        if ordering not in ORDERINGS:
+            ordering = "newest"
+        qs = qs.annotate(
+            priority_rank=PRIORITY_ORDER,
+            due_date_null=Case(
+                When(due_date__isnull=True, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
+        ).order_by(*ORDERINGS[ordering])
+
+        paginator = TodoPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        data = TodoSerializer(page, many=True, context=_todo_ctx(request)).data
+        return paginator.get_paginated_response(data)
+
+    @extend_schema(request=TodoCreateSerializer, responses=TodoSerializer)
+    def post(self, request):
+        if is_admin(request.user):
+            self.permission_denied(
+                request, message="Administrators cannot create tasks. Ask a project manager."
+            )
+        serializer = TodoCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        team = get_object_or_404(Team, pk=data.pop("team_id"))
+        todo = todo_service.create_todo(actor=request.user, team=team, **data)
+        todo = todos_visible_to(request.user).get(pk=todo.pk)
+        return Response(
+            TodoSerializer(todo, context=_todo_ctx(request)).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class TodoDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _todo(self, request, pk):
+        return get_object_or_404(todos_visible_to(request.user), pk=pk)
+
+    @extend_schema(responses=TodoSerializer)
+    def get(self, request, pk):
+        todo = self._todo(request, pk)
+        return Response(TodoSerializer(todo, context=_todo_ctx(request)).data)
+
+    @extend_schema(request=TodoUpdateSerializer, responses=TodoSerializer)
+    def patch(self, request, pk):
+        todo = self._todo(request, pk)
+        serializer = TodoUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        todo_service.update_todo(
+            actor=request.user, todo=todo, **serializer.validated_data
+        )
+        todo = self._todo(request, pk)
+        return Response(TodoSerializer(todo, context=_todo_ctx(request)).data)
+
+    def delete(self, request, pk):
+        todo = self._todo(request, pk)
+        todo_service.delete_todo(actor=request.user, todo=todo)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TodoStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(request=TodoStatusSerializer, responses=TodoSerializer)
+    def patch(self, request, pk):
+        todo = get_object_or_404(todos_visible_to(request.user), pk=pk)
+        serializer = TodoStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        todo_service.change_status(
+            actor=request.user, todo=todo, status=serializer.validated_data["status"]
+        )
+        todo = get_object_or_404(todos_visible_to(request.user), pk=pk)
+        return Response(TodoSerializer(todo, context=_todo_ctx(request)).data)
+
+
+class TodoActivityListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses=TodoActivitySerializer(many=True))
+    def get(self, request, pk):
+        todo = get_object_or_404(todos_visible_to(request.user), pk=pk)
+        activities = todo.activities.select_related("actor")
+        return Response(TodoActivitySerializer(activities, many=True).data)
+
+
+# ======================================================================= notifications
 class NotificationListView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        parameters=[OpenApiParameter("unread", bool)],
+        responses=NotificationSerializer(many=True),
+    )
     def get(self, request):
-        notifications = Notification.objects.filter(
-            recipient=request.user
-        ).select_related("actor", "todo")
-
-        serializer = NotificationSerializer(
-            notifications,
-            many=True,
+        qs = Notification.objects.filter(recipient=request.user).select_related("actor")
+        if request.query_params.get("unread") == "true":
+            qs = qs.filter(is_read=False)
+        paginator = DefaultPagination()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(
+            NotificationSerializer(page, many=True).data
         )
-
-        return Response(serializer.data)
 
 
 class NotificationUnreadCountView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses=inline_serializer(
+            "UnreadCount", {"unread_count": serializers.IntegerField()}
+        )
+    )
     def get(self, request):
-        count = Notification.objects.filter(
-            recipient=request.user,
-            is_read=False,
-        ).count()
-
+        count = Notification.objects.filter(recipient=request.user, is_read=False).count()
         return Response({"unread_count": count})
 
 
 class NotificationMarkReadView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(request=None, responses=NotificationSerializer)
     def patch(self, request, pk):
-        notification = get_object_or_404(
-            Notification,
-            pk=pk,
-            recipient=request.user,
-        )
-
-        notification.is_read = True
-        notification.save(update_fields=["is_read"])
-
-        return Response({"detail": "Notification marked as read."})
+        notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
+        if not notification.is_read:
+            notification.is_read = True
+            notification.save(update_fields=["is_read"])
+        return Response(NotificationSerializer(notification).data)
 
 
 class NotificationMarkAllReadView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        updated_count = Notification.objects.filter(
-            recipient=request.user,
-            is_read=False,
+    @extend_schema(
+        request=None,
+        responses=inline_serializer("MarkAllRead", {"updated": serializers.IntegerField()}),
+    )
+    def patch(self, request):
+        updated = Notification.objects.filter(
+            recipient=request.user, is_read=False
         ).update(is_read=True)
+        return Response({"updated": updated})
 
-        return Response({
-            "detail": "All notifications marked as read.",
-            "updated_count": updated_count,
-        })
 
-class AdminDashboardView(APIView):
-    """Workspace-wide, read-only statistics for administrators."""
+# ======================================================================= admin overview
+class AdminOverviewView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
 
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
-
+    @extend_schema(responses=OpenApiTypes.OBJECT)
     def get(self, request):
-        users = User.objects.select_related("profile__team").order_by("username")
-        todos = Todo.objects.select_related("team", "user", "assignee")
-        total_todos = todos.count()
-        completed_todos = todos.filter(
-            task_status=Todo.TaskStatus.COMPLETED
-        ).count()
-        incomplete_todos = total_todos - completed_todos
-        pending_assignments = todos.filter(
-            assignment_status=Todo.AssignmentStatus.PENDING
-        ).count()
+        today = timezone.localdate()
+        status_counts = {s: 0 for s in Todo.Status.values}
+        for row in Todo.objects.values("status").annotate(n=Count("id")):
+            status_counts[row["status"]] = row["n"]
 
-        user_activity = []
-        for user in users:
-            assigned = Todo.objects.filter(assignee=user)
-            assigned_count = assigned.count()
-            completed_count = assigned.filter(
-                task_status=Todo.TaskStatus.COMPLETED
-            ).count()
-            created_count = Todo.objects.filter(user=user).count()
-            last_task_activity = Todo.objects.filter(
-                Q(user=user) | Q(assignee=user)
-            ).aggregate(last_activity=Max("updated_at"))["last_activity"]
-            inactivity_cutoff = timezone.now() - timedelta(days=30)
-            user_activity.append({
-                "id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": user.profile.role,
-                "team": user.profile.team.name if user.profile.team else None,
-                "assigned_todos": assigned_count,
-                "created_todos": created_count,
-                "completed_todos": completed_count,
-                "pending_todos": assigned.filter(
-                    task_status=Todo.TaskStatus.PENDING
-                ).count(),
-                "in_progress_todos": assigned.filter(
-                    task_status=Todo.TaskStatus.IN_PROGRESS
-                ).count(),
-                "completion_rate": round(
-                    completed_count / assigned_count * 100
-                ) if assigned_count else 0,
-                "last_login": user.last_login,
-                "last_task_activity": last_task_activity,
-                "inactive_30_days": (
-                    last_task_activity is None
-                    or last_task_activity < inactivity_cutoff
-                ),
-            })
-
-        team_activity = []
-        for team in Team.objects.order_by("name"):
-            team_todos = todos.filter(team=team)
-            team_total = team_todos.count()
-            team_completed = team_todos.filter(
-                task_status=Todo.TaskStatus.COMPLETED
-            ).count()
-            team_member_count = team.members.count()
-            active_todos = team_todos.exclude(
-                task_status=Todo.TaskStatus.COMPLETED
-            ).count()
-            team_activity.append({
-                "id": team.id,
-                "name": team.name,
-                "members": team_member_count,
-                "todos": team_total,
-                "active_todos": active_todos,
-                "active_todos_per_member": round(
-                    active_todos / team_member_count, 1
-                ) if team_member_count else 0,
-                "completed_todos": team_completed,
-                "incomplete_todos": team_total - team_completed,
-                "completion_rate": round(
-                    team_completed / team_total * 100
-                ) if team_total else 0,
-            })
-
-        stale_cutoff = timezone.now() - timedelta(days=7)
-        stale_todos = todos.exclude(
-            task_status=Todo.TaskStatus.COMPLETED
-        ).filter(updated_at__lt=stale_cutoff).order_by("updated_at")[:10]
-        attention = {
-            "unassigned_todos": todos.filter(assignee__isnull=True).exclude(
-                task_status=Todo.TaskStatus.COMPLETED
-            ).count(),
-            "stale_todos": todos.exclude(
-                task_status=Todo.TaskStatus.COMPLETED
-            ).filter(updated_at__lt=stale_cutoff).count(),
-            "inactive_users": sum(1 for item in user_activity if item["inactive_30_days"]),
-            "stale_todo_preview": [{
-                "id": todo.id,
-                "title": todo.title,
-                "team": todo.team.name if todo.team else None,
-                "creator": todo.user.username,
-                "assignee": todo.assignee.username if todo.assignee else None,
-                "task_status": todo.task_status,
-                "updated_at": todo.updated_at,
-            } for todo in stale_todos],
-        }
-
-        recent_activity = [{
-            "id": notification.id,
-            "message": notification.message,
-            "actor": notification.actor.username if notification.actor else None,
-            "recipient": notification.recipient.username,
-            "todo_id": notification.todo_id,
-            "todo_title": notification.todo.title,
-            "created_at": notification.created_at,
-        } for notification in Notification.objects.select_related(
-            "actor", "recipient", "todo"
-        ).order_by("-created_at")[:10]]
-
-        return Response({
-            "overview": {
-                "total_users": users.count(),
-                "total_teams": Team.objects.count(),
-                "total_todos": total_todos,
-                "incomplete_todos": incomplete_todos,
-                "completed_todos": completed_todos,
-                "pending_assignments": pending_assignments,
-                "completion_rate": round(
-                    completed_todos / total_todos * 100
-                ) if total_todos else 0,
-            },
-            "task_status": {
-                "pending": todos.filter(task_status=Todo.TaskStatus.PENDING).count(),
-                "in_progress": todos.filter(task_status=Todo.TaskStatus.IN_PROGRESS).count(),
-                "completed": completed_todos,
-            },
-            "teams": team_activity,
-            "users": user_activity,
-            "attention": attention,
-            "recent_activity": recent_activity,
-        })
-
-
-class AdminUserTodosView(APIView):
-    """Read-only inspection of todos created by or assigned to a user."""
-
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
-
-    def get(self, request, pk):
-        user = get_object_or_404(User.objects.select_related("profile__team"), pk=pk)
-        todos = Todo.objects.filter(
-            Q(user=user) | Q(assignee=user)
-        ).select_related("user", "assignee", "team").order_by("-updated_at")
-
-        results = [{
-            "id": todo.id,
-            "title": todo.title,
-            "description": todo.description,
-            "creator": todo.user.username,
-            "assignee": todo.assignee.username if todo.assignee else None,
-            "team": todo.team.name if todo.team else None,
-            "task_status": todo.task_status,
-            "assignment_status": todo.assignment_status,
-            "created_at": todo.created_at,
-            "updated_at": todo.updated_at,
-        } for todo in todos]
-
-        return Response({
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "role": user.profile.role,
-                "team": user.profile.team.name if user.profile.team else None,
-            },
-            "results": results,
-            "count": len(results),
-        })
-
-
-class AdminTodoExplorerView(APIView):
-    """Search and filter workspace todos without granting mutation access."""
-
-    permission_classes = [IsAuthenticated, IsAdminUserRole]
-
-    def get(self, request):
-        todos = Todo.objects.select_related(
-            "user", "assignee", "team"
-        ).all()
-
-        search = request.query_params.get("search", "").strip()
-        if search:
-            todos = todos.filter(
-                Q(title__icontains=search)
-                | Q(description__icontains=search)
-                | Q(user__username__icontains=search)
-                | Q(assignee__username__icontains=search)
-                | Q(team__name__icontains=search)
-            )
-
-        team_id = request.query_params.get("team")
-        if team_id:
-            if not team_id.isdigit():
-                return Response({"detail": "team must be a numeric team ID."}, status=400)
-            todos = todos.filter(team_id=int(team_id))
-
-        task_status = request.query_params.get("status")
-        valid_statuses = {value for value, _label in Todo.TaskStatus.choices}
-        if task_status:
-            normalized_status = task_status.upper()
-            if normalized_status not in valid_statuses:
-                return Response({"detail": "Invalid task status."}, status=400)
-            todos = todos.filter(task_status=normalized_status)
-
-        assignment_status = request.query_params.get("assignment_status")
-        valid_assignment_statuses = {
-            value for value, _label in Todo.AssignmentStatus.choices
-        }
-        if assignment_status:
-            normalized_assignment_status = assignment_status.upper()
-            if normalized_assignment_status not in valid_assignment_statuses:
-                return Response({"detail": "Invalid assignment status."}, status=400)
-            todos = todos.filter(assignment_status=normalized_assignment_status)
-
-        unassigned = request.query_params.get("unassigned")
-        if unassigned == "true":
-            todos = todos.filter(assignee__isnull=True)
-        elif unassigned not in (None, "", "false"):
-            return Response({"detail": "unassigned must be true or false."}, status=400)
-
-        creator_id = request.query_params.get("creator")
-        assignee_id = request.query_params.get("assignee")
-        for parameter, value in (("creator", creator_id), ("assignee", assignee_id)):
-            if value and not value.isdigit():
-                return Response({"detail": f"{parameter} must be a numeric user ID."}, status=400)
-        if creator_id:
-            todos = todos.filter(user_id=int(creator_id))
-        if assignee_id:
-            todos = todos.filter(assignee_id=int(assignee_id))
-
-        ordering = request.query_params.get("ordering", "-updated_at")
-        allowed_ordering = {"created_at", "-created_at", "updated_at", "-updated_at", "title", "-title"}
-        if ordering not in allowed_ordering:
-            return Response({"detail": "Invalid ordering."}, status=400)
-        todos = todos.order_by(ordering, "-id")
-
-        paginator = TodoPagination()
-        page = paginator.paginate_queryset(todos, request)
-        results = [{
-            "id": todo.id,
-            "title": todo.title,
-            "description": todo.description,
-            "creator": todo.user.username,
-            "creator_id": todo.user_id,
-            "assignee": todo.assignee.username if todo.assignee else None,
-            "assignee_id": todo.assignee_id,
-            "team": todo.team.name if todo.team else None,
-            "team_id": todo.team_id,
-            "task_status": todo.task_status,
-            "assignment_status": todo.assignment_status,
-            "created_at": todo.created_at,
-            "updated_at": todo.updated_at,
-        } for todo in page]
-
-        return paginator.get_paginated_response(results)
-
-
-
-class TodoActivityListView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        # Members can see activities for tasks they created
-        # or tasks assigned to them. Admins can inspect all tasks.
-        visible_todos = Todo.objects.all()
-
-        if request.user.profile.role != UserProfile.Role.ADMIN:
-            visible_todos = visible_todos.filter(
-                Q(user=request.user) | Q(assignee=request.user)
-            )
-
-        todo = get_object_or_404(visible_todos, pk=pk)
-
-        activities = (
-            TodoActivity.objects
-            .filter(todo=todo)
-            .select_related("actor")
-            .order_by("-created_at", "-id")
+        people = User.objects.filter(is_active=True).exclude(profile__role="ADMIN").exclude(
+            is_superuser=True
         )
+        teams = annotated_teams()
 
-        paginator = TodoPagination()
-        page = paginator.paginate_queryset(activities, request)
+        workload_rows = list(
+            TodoAssignment.objects.exclude(todo__status=Todo.Status.COMPLETED)
+            .values("user_id")
+            .annotate(n=Count("id"))
+            .order_by("-n")[:6]
+        )
+        users = {u.id: u for u in User.objects.filter(id__in=[r["user_id"] for r in workload_rows])}
 
-        serializer = TodoActivitySerializer(page, many=True)
+        recent = TodoActivity.objects.select_related("actor", "todo", "todo__team")[:10]
 
-        return paginator.get_paginated_response(serializer.data)
+        return Response(
+            {
+                "totals": {
+                    "teams": Team.objects.count(),
+                    "active_users": people.count(),
+                    "unassigned_users": unassigned_users().count(),
+                    "todos": sum(status_counts.values()),
+                    "open_todos": status_counts["PENDING"] + status_counts["IN_PROGRESS"],
+                    "overdue": Todo.objects.filter(due_date__lt=today)
+                    .exclude(status=Todo.Status.COMPLETED)
+                    .count(),
+                },
+                "status_counts": status_counts,
+                "teams": TeamSerializer(teams, many=True, context={"request": request}).data,
+                "workload": [
+                    {
+                        "user": {
+                            "id": r["user_id"],
+                            "name": display_name(users[r["user_id"]]),
+                        },
+                        "open_tasks": r["n"],
+                    }
+                    for r in workload_rows
+                    if r["user_id"] in users
+                ],
+                "recent_activity": [
+                    {
+                        "id": a.id,
+                        "description": a.description,
+                        "created_at": a.created_at,
+                        "todo_id": a.todo_id,
+                        "todo_title": a.todo.title,
+                        "team": {
+                            "id": a.todo.team_id,
+                            "name": a.todo.team.name,
+                            "color": a.todo.team.color,
+                        },
+                    }
+                    for a in recent
+                ],
+            }
+        )

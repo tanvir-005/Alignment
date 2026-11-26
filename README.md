@@ -1,277 +1,116 @@
-# The Scroll of Procrastination
+# Teamboard
 
-A team-based TODO management system built with Django REST Framework and Next.js.
+Team task management for an organisation. An **admin** (the owner) creates teams and
+decides who is in them, each team has exactly one **project manager (PM)**, PMs assign work,
+and **assignees** move it forward on a Kanban board.
 
-## Overview
+Stack (unchanged): Django 5 + DRF + SimpleJWT + drf-spectacular + SQLite · Next.js 15 (App Router, JS, CSS Modules) · pytest.
 
-The Scroll of Procrastination is a collaborative task management application where team members can create, assign, track, and manage tasks. It includes role-based access control, assignment workflows, notifications, a Kanban board, and an administrative dashboard.
+## Roles and rules
 
-## Features
+| Who | Can | Cannot |
+|---|---|---|
+| **Admin** | Create/edit/delete teams, choose a team's PM on creation, add/remove members, replace a PM, deactivate people. Sees every team and task. | Create or change tasks. Belong to a team. |
+| **PM** (per team) | Create, edit, delete and assign tasks of *their* team to some or all members (themselves included). Change task status. | Add/remove members. |
+| **Assignee** | Change the status of tasks assigned to them. | Edit or delete tasks. |
+| **Member** | See all tasks of teams they belong to (read-only unless assigned). | |
 
-- **Authentication:** JWT-based authentication using HttpOnly cookies.
-- **Role management:** Admin and Member roles with role-based permissions.
-- **Team management:** Organize users into teams.
-- **Task management:** Create, view, update, search, filter, sort, and paginate tasks.
-- **Task assignment:** Assign tasks to teammates within the same team.
-- **Assignment workflow:** Assignees can accept or reject task assignments.
-- **Task status management:** Move tasks between Pending, In Progress, and Completed states.
-- **Kanban board:** Visualize tasks in three status columns and move them using directional arrow controls.
-- **Notifications:** Receive updates about task assignments and responses.
-- **Admin dashboard:** View system statistics, user activity, team information, and recent activity.
-- **User task inspection:** Administrators can inspect individual users' tasks through the dashboard.
-- **Custom error page:** Dedicated not-found page for unavailable routes.
+- Everyone who signs up is a plain user with **no team**; they see a "waiting for an admin" screen until added.
+- PM is a role *inside a team*. A user can be PM of several teams and a plain member of others.
+- No team without a PM (a team is created together with its PM) and no PM without a team (PM-ness lives on the membership).
+  A PM cannot be removed directly; use **Replace PM**, which swaps atomically.
+- Joining, leaving, adding and removing are admin-only. Removing someone from a team unassigns them from that
+  team's tasks, and **deletes every task they were the last assignee of** (the admin sees an exact count before confirming).
+- A task needs at least one assignee, and assignees must be members of the task's team.
+- Status is shared per task (Pending / In progress / Completed): any assignee or the PM can change it; the activity log records who did.
+- **My tasks** shows a Kanban board with only the tasks you can change (assigned to you, or in teams you manage),
+  and a list of the other tasks in your teams. Each team page has the same split, per team.
 
-## Technology Stack
-
-| Layer | Technologies |
-|---|---|
-| Backend | Python, Django, Django REST Framework |
-| Authentication | Simple JWT, HttpOnly cookies |
-| API documentation | drf-spectacular |
-| Database | SQLite |
-| Frontend | Next.js, React, JavaScript |
-| Styling | CSS Modules |
-| Testing | pytest, pytest-django |
-
-## Architecture
-
-The application uses a Backend-for-Frontend (BFF) architecture.
-
-```text
-Browser
-   |
-   v
-Next.js Frontend
-   |
-   v
-Next.js API Routes
-   |
-   v
-Django REST API
-   |
-   v
-SQLite Database
-```
-
-JWT tokens are stored in HttpOnly cookies. The browser communicates with Next.js API routes, which handle requests to the Django backend. Authentication credentials are not exposed to browser-side JavaScript.
-
-## Business Rules
-
-### Roles
-
-- **ADMIN:** Can manage users, roles, and team assignments. Has read-only access to task information.
-- **MEMBER:** Can create and manage their own tasks and interact with tasks assigned to them.
-
-The first registered user becomes an admin. Subsequent registrations receive the Member role.
-
-### Tasks
-
-Task statuses:
-
-- `PENDING`
-- `IN_PROGRESS`
-- `COMPLETED`
-
-Status transitions follow this sequence:
-
-```text
-PENDING <-> IN_PROGRESS <-> COMPLETED
-```
-
-Tasks can only move one stage at a time. Skipping stages is not allowed.
-
-### Assignments
-
-Assignment statuses:
-
-- `PENDING`
-- `ACCEPTED`
-- `REJECTED`
-
-Key permissions:
-
-- A task can be assigned to a teammate in the same team.
-- Users cannot assign tasks to themselves.
-- Assignees can accept or reject assignments.
-- After assignment, only the assignee can edit the task.
-- The creator can view the task but cannot edit it after assignment.
-- Assigned tasks cannot be deleted.
-- An assignee must accept an assignment before changing its task status.
-- Only the assigned user can update an accepted assigned task.
-- For unassigned tasks, only the creator can change the task status.
-- Administrators have read-only access to tasks and cannot create, edit, assign, change the status of, or delete them.
-
-## Application Pages
-
-### My Tasks
-
-The primary task management interface. Members can create tasks, search and filter existing tasks, sort results, navigate paginated results, and manage assignment workflows.
-
-### Kanban
-
-A separate visual task management interface with three columns:
-
-- Pending
-- In Progress
-- Completed
-
-Each task card has left and right arrow controls to move it between adjacent statuses. Controls are enabled or disabled according to the task's current status and the user's permissions. The board does not use drag-and-drop.
-
-### Administration
-
-The administrative dashboard provides an overview of the workspace, including task statistics, status distribution, team information, user activity, and recent activity.
-
-Administrators can inspect individual users' tasks without modifying them.
-
-## Project Structure
-
-```text
-todo-workspace/
-├── config/                 # Django project configuration
-├── todos/                  # Tasks, users, teams, notifications
-├── frontend/               # Next.js application
-├── .env.example
-├── docker-compose.yml
-├── Dockerfile
-├── manage.py
-├── pytest.ini
-├── requirements.txt
-└── README.md
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.12+
-- Node.js 24+
-- npm
-
-### 1. Clone the repository
+## Run it
 
 ```bash
-git clone https://github.com/tanvir-005/todo-workspace.git
-cd todo-workspace
-```
-
-### 2. Set up the backend
-
-Create and activate a virtual environment:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
+# backend
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-Configure environment variables:
-
-```bash
 cp .env.example .env
-```
-
-Update the environment values as needed, including the Django secret key and allowed hosts.
-
-Run migrations and load demo data:
-
-```bash
 python manage.py migrate
-python manage.py seed_demo
-```
-
-Start the backend:
-
-```bash
+python manage.py seed_demo            # optional demo organisation
 python manage.py runserver 8080
-```
 
-Backend API: `http://127.0.0.1:8080/api/`
-
-### 3. Set up the frontend
-
-Open another terminal:
-
-```bash
+# frontend (second terminal)
 cd frontend
+cp .env.example .env.local
 npm install
+npm run dev                           # http://localhost:3000
 ```
 
-Create `frontend/.env.local`:
-
-```env
-DJANGO_API_URL=http://127.0.0.1:8080/api
-```
-
-Start the frontend:
+Create the owner account (the first admin cannot sign up through the UI):
 
 ```bash
-npm run dev
+python manage.py createadmin --email owner@yourorg.com --name "Olivia Owner"
 ```
 
-Frontend: `http://localhost:3000`
+Demo data (`seed_demo`): admin `admin@example.com` / `Admin@2026Demo`; users `priya@`, `omar@`, `lena@`,
+`jonas@`, `mei@`, `ana@`, `tomas@`, `sam@example.com` / `Demo@2026Pass`.
+Priya is PM of Atlas and member of Beacon; Omar is the reverse; Sam has no team yet.
 
-## Demo Accounts
+Tests: `pytest` (84 tests covering the permission matrix, PM replacement, member-removal cascade, visibility, emails and the digest).
+API docs: `python manage.py spectacular --file schema.yml` (committed as `schema.yml`) or `/api/schema/` if enabled.
 
-The following accounts are created by `seed_demo` on a fresh database.
 
-| Username | Password | Role | Team |
-|---|---|---|---|
-| `demo_admin` | `Admin@2026Demo` | ADMIN | Team Alpha |
-| `alice` | `Alice@2026Secure` | MEMBER | Team Alpha |
-| `bob` | `Bob@2026Secure` | MEMBER | Team Alpha |
-| `charlie` | `Charlie@2026Secure` | MEMBER | Team Beta |
+## Emails and the daily digest
 
-The seed command is repeatable and does not overwrite existing users' passwords, roles, or team assignments.
-
-## API Overview
-
-All backend endpoints are prefixed with `/api/`.
-
-| Resource | Endpoint |
+| Event | Who is emailed |
 |---|---|
-| Authentication | `/auth/` |
-| Tasks | `/todos/` |
-| Task status updates | `/todos/{id}/status/` |
-| Assignments | `/assignments/` |
-| Notifications | `/notifications/` |
-| Teams | `/teams/` |
-| Users | `/users/` |
-| Admin dashboard | `/admin/dashboard/` |
-| Admin user task inspection | `/admin/users/{id}/todos/` |
+| A task is assigned (on creation, or added later by the PM) | Each newly assigned person, never the person who assigned them |
+| A task's status changes | That team's PM, never when the PM made the change themselves |
+| 10 PM every day | Each PM, one summary per team they manage, covering the previous 24 hours |
 
-API documentation is available through the configured API documentation endpoint.
+Emails go out only after the change is saved, and a mail failure never breaks the app (it is logged).
+By default emails are **printed in the backend terminal** (demo mode). To send real mail, set
+`EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend` and the `EMAIL_*` values in `.env`
+(see `.env.example`). `FRONTEND_URL` controls the links inside emails and `TIME_ZONE` decides what "10 PM" means.
 
-## Testing
-
-Run the backend test suite from the project root:
+**The digest** is a command; the schedule lives outside the app so it survives restarts and works anywhere:
 
 ```bash
-pytest -v
+python manage.py send_daily_digest              # what the scheduler runs
+python manage.py send_daily_digest --dry-run    # print instead of sending
+python manage.py send_daily_digest --force      # send again even if already sent today
+python manage.py send_daily_digest --hours 72   # custom window (testing)
+python manage.py send_daily_digest --team 3     # one team only
 ```
 
-The test suite covers authentication, task operations, permissions, assignments, notifications, filtering, sorting, pagination, and task status transitions.
+It skips teams with no activity, and records one `DigestLog` row per team per day so a re-run never double-sends.
+Deleted tasks are included (a small tombstone is kept for that purpose).
 
-## Useful Commands
+Schedule it for 22:00 (server time, set `TIME_ZONE`):
 
-**Backend**
+- **Linux/macOS (cron):** `crontab -e` and add
+  `0 22 * * * cd /path/to/todo-workspace && .venv/bin/python manage.py send_daily_digest >> digest.log 2>&1`
+- **Windows:** Task Scheduler, daily at 22:00, action `C:\path\.venv\Scripts\python.exe manage.py send_daily_digest`, start in the project folder.
+- **Docker Compose:** `docker compose up scheduler` runs a small loop that triggers it at 22:00 container time (`TZ` in the compose file).
 
-```bash
-python manage.py migrate
-python manage.py seed_demo
-python manage.py runserver 8080
-pytest -v
+## Structure
+
+```
+todos/
+  models.py            Team, TeamMembership (PM/MEMBER), Todo, TodoAssignment, Notification, TodoActivity
+  permissions.py       single source of truth for who can do what
+  selectors.py         scoped querysets (visible / actionable)
+  services/            team_service, todo_service (atomic business rules), notifications, activity
+  views.py, urls.py    thin API layer
+  tests/               pytest suite
+frontend/src/
+  app/(auth)           login, register
+  app/(workspace)      my-tasks, teams/[id], todos/[id], notifications, admin/*
+  app/api/[...path]    one authenticated pass-through to Django (cookies hold the JWTs)
+  components/          layout shell, ui primitives, kanban, todo list/form, admin modals
 ```
 
-**Frontend**
+## API summary
 
-```bash
-npm run dev
-npm run lint
-npm run build
-npm start
-```
+`/api/auth/{register,login,refresh,me}` · `/api/teams/` (+ `members/`, `members/<id>/impact/`, `replace-pm/`) ·
+`/api/users/` (admin) · `/api/todos/?scope=actionable|mine|other|all&team=&status=&priority=&search=&ordering=` ·
+`/api/todos/<id>/{status,activities}/` · `/api/notifications/…` · `/api/admin/overview/`.
+Every todo carries `can_change_status`, `can_edit` and `is_assignee` so the UI never re-derives permissions.

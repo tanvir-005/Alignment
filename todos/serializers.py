@@ -1,201 +1,267 @@
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
-from django.contrib.auth.models import User
-from .models import Todo, Team, UserProfile, Notification, TodoActivity
 
-class TodoSerializer(serializers.ModelSerializer):
-    creator = serializers.IntegerField(
-        source="user_id",
-        read_only=True
-    )
+from .models import (
+    TEAM_COLORS,
+    Notification,
+    Team,
+    TeamMembership,
+    Todo,
+    TodoActivity,
+)
+from .permissions import (
+    can_change_status,
+    can_edit_todo,
+    is_admin,
+    is_assignee,
+    membership_map,
+)
+from .utils.names import display_name
 
-    assignee = serializers.PrimaryKeyRelatedField(
-        read_only=True
-    )
+User = get_user_model()
 
-    team = serializers.PrimaryKeyRelatedField(
-        read_only=True
-    )
 
-    is_completed = serializers.BooleanField(read_only=True)
+class UserBriefSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
 
     class Meta:
-        model = Todo
-        fields = [
-            "id",
-            "creator",
-            "assignee",
-            "team",
-            "title",
-            "description",
-            "task_status",
-            "assignment_status",
-            "is_completed",
-            "created_at",
-            "updated_at",
-        ]
+        model = User
+        fields = ["id", "name", "email"]
 
-        read_only_fields = [
-            "id",
-            "creator",
-            "assignee",
-            "team",
-            "assignment_status",
-            "is_completed",
-            "created_at",
-            "updated_at",
-        ]
+    def get_name(self, obj):
+        return display_name(obj)
 
-    def validate_title(self, value):
-        value = value.strip()
 
-        if not value:
-            raise serializers.ValidationError(
-                "Title cannot be empty or contain only whitespace."
-            )
+class TeamBriefSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Team
+        fields = ["id", "name", "color"]
 
-        return value
 
-    def update(self, instance, validated_data):
-        instance = super().update(instance, validated_data)
-
-        instance.is_completed = (
-            instance.task_status == Todo.TaskStatus.COMPLETED
-        )
-        instance.save(update_fields=["is_completed"])
-
-        return instance
-
+# ---------------------------------------------------------------- teams
 class TeamSerializer(serializers.ModelSerializer):
-    members = serializers.SerializerMethodField()
+    """Expects a queryset from selectors.annotated_teams()."""
+
+    pm = serializers.SerializerMethodField()
+    member_count = serializers.IntegerField(read_only=True)
+    todo_counts = serializers.SerializerMethodField()
+    my_role = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
-        fields = ["id", "name", "description", "members"]
-
-    def get_members(self, obj):
-        profiles = obj.members.select_related("user").all()
-
-        return [
-            {
-                "id": profile.user.id,
-                "username": profile.user.username,
-                "first_name": profile.user.first_name,
-                "last_name": profile.user.last_name,
-                "role": profile.role,
-            }
-            for profile in profiles
+        fields = [
+            "id", "name", "description", "color", "created_at",
+            "pm", "member_count", "todo_counts", "my_role",
         ]
 
-class UserListSerializer(serializers.ModelSerializer):
-    role = serializers.CharField(source="profile.role", read_only=True)
-    team = serializers.SerializerMethodField()
-    created_todo_count = serializers.IntegerField(read_only=True)
-    assigned_todo_count = serializers.IntegerField(read_only=True)
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_pm(self, obj):
+        for m in obj.memberships.all():
+            if m.role == TeamMembership.Role.PM:
+                return UserBriefSerializer(m.user).data
+        return None
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_todo_counts(self, obj):
+        pending = getattr(obj, "n_pending", 0)
+        progress = getattr(obj, "n_in_progress", 0)
+        done = getattr(obj, "n_completed", 0)
+        return {
+            "PENDING": pending,
+            "IN_PROGRESS": progress,
+            "COMPLETED": done,
+            "total": pending + progress + done,
+        }
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_my_role(self, obj):
+        request = self.context.get("request")
+        if not request or is_admin(request.user):
+            return None
+        return membership_map(request.user).get(obj.id)
+
+
+class TeamDetailSerializer(TeamSerializer):
+    members = serializers.SerializerMethodField()
+
+    class Meta(TeamSerializer.Meta):
+        fields = TeamSerializer.Meta.fields + ["members"]
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_members(self, obj):
+        open_tasks = self.context.get("open_tasks", {})
+        rows = []
+        for m in obj.memberships.all():
+            data = UserBriefSerializer(m.user).data
+            data["role"] = m.role
+            data["joined_at"] = m.joined_at
+            data["open_tasks"] = open_tasks.get(m.user_id, 0)
+            rows.append(data)
+        rows.sort(key=lambda r: (r["role"] != TeamMembership.Role.PM, r["name"].lower()))
+        return rows
+
+
+class TeamWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    color = serializers.ChoiceField(choices=TEAM_COLORS, required=False)
+    pm_id = serializers.IntegerField(required=False)
+
+    def validate_name(self, value):
+        value = value.strip()
+        qs = Team.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A team with this name already exists.")
+        return value
+
+
+class AddMembersSerializer(serializers.Serializer):
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False
+    )
+
+
+class ReplacePMSerializer(serializers.Serializer):
+    pm_id = serializers.IntegerField()
+    old_pm_action = serializers.ChoiceField(
+        choices=["member", "remove"], default="member"
+    )
+
+
+# ---------------------------------------------------------------- users
+class AdminUserSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    memberships = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
-            "id",
-            "username",
-            "email",
-            "first_name",
-            "last_name",
-            "role",
-            "team",
-            "created_todo_count",
-            "assigned_todo_count",
+            "id", "name", "email", "role", "is_active", "date_joined", "memberships",
         ]
 
-    def get_team(self, obj):
-        team = obj.profile.team
+    def get_name(self, obj):
+        return display_name(obj)
 
-        if not team:
-            return None
+    def get_role(self, obj):
+        return "ADMIN" if is_admin(obj) else "USER"
 
-        return {
-            "id": team.id,
-            "name": team.name,
-        }
-
-class UserAdminUpdateSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(
-        choices=UserProfile.Role.choices,
-        required=False
-    )
-
-    team = serializers.PrimaryKeyRelatedField(
-        queryset=Team.objects.all(),
-        required=False,
-        allow_null=True
-    )
-
-    def validate(self, attrs):
-        if not attrs:
-            raise serializers.ValidationError(
-                "Provide at least one field to update."
-            )
-        return attrs
-
-class TodoAssignmentSerializer(serializers.Serializer):
-    assignee = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(is_active=True)
-    )
-
-class TodoAssignmentResponseSerializer(serializers.Serializer):
-    decision = serializers.ChoiceField(
-        choices=[
-            Todo.AssignmentStatus.ACCEPTED,
-            Todo.AssignmentStatus.REJECTED,
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_memberships(self, obj):
+        return [
+            {
+                "team_id": m.team_id,
+                "team_name": m.team.name,
+                "team_color": m.team.color,
+                "role": m.role,
+            }
+            for m in obj.team_memberships.all()
         ]
-    )
+
+
+# ---------------------------------------------------------------- todos
+class TodoSerializer(serializers.ModelSerializer):
+    team = TeamBriefSerializer(read_only=True)
+    created_by = UserBriefSerializer(read_only=True)
+    assignees = serializers.SerializerMethodField()
+    is_overdue = serializers.SerializerMethodField()
+    can_change_status = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    is_assignee = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Todo
+        fields = [
+            "id", "title", "description", "priority", "due_date", "status",
+            "is_overdue", "team", "created_by", "assignees",
+            "created_at", "updated_at", "completed_at",
+            "can_change_status", "can_edit", "is_assignee",
+        ]
+
+    def _user(self):
+        return self.context["request"].user
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_assignees(self, obj):
+        users = sorted(
+            (a.user for a in obj.assignments.all()), key=lambda u: display_name(u).lower()
+        )
+        return UserBriefSerializer(users, many=True).data
+
+    def get_is_overdue(self, obj):
+        return bool(
+            obj.due_date
+            and obj.status != Todo.Status.COMPLETED
+            and obj.due_date < timezone.localdate()
+        )
+
+    def get_can_change_status(self, obj):
+        return can_change_status(self._user(), obj)
+
+    def get_can_edit(self, obj):
+        return can_edit_todo(self._user(), obj)
+
+    def get_is_assignee(self, obj):
+        return is_assignee(self._user(), obj)
+
+
+class TodoCreateSerializer(serializers.Serializer):
+    team_id = serializers.IntegerField()
+    title = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    priority = serializers.ChoiceField(choices=Todo.Priority.choices, default=Todo.Priority.MEDIUM)
+    due_date = serializers.DateField(required=False, allow_null=True, default=None)
+    assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+    all_members = serializers.BooleanField(required=False, default=False)
+
+    def validate_title(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Title cannot be blank.")
+        return value
+
+
+class TodoUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    priority = serializers.ChoiceField(choices=Todo.Priority.choices, required=False)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+    all_members = serializers.BooleanField(required=False, default=False)
+
+    def validate_title(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Title cannot be blank.")
+        return value
+
+
+class TodoStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=Todo.Status.choices)
+
+
+class TodoActivitySerializer(serializers.ModelSerializer):
+    actor = UserBriefSerializer(read_only=True)
+
+    class Meta:
+        model = TodoActivity
+        fields = ["id", "event_type", "description", "metadata", "actor", "created_at"]
+
 
 class NotificationSerializer(serializers.ModelSerializer):
-    actor = serializers.CharField(
-        source="actor.username",
-        read_only=True,
-        default=None,
-    )
-    todo_title = serializers.CharField(
-        source="todo.title",
-        read_only=True,
-    )
+    actor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
         fields = [
-            "id",
-            "actor",
-            "todo",
-            "todo_title",
-            "message",
-            "is_read",
-            "created_at",
+            "id", "message", "is_read", "created_at", "todo_id", "team_id", "actor_name",
         ]
-        read_only_fields = fields
 
-
-class TodoActivitySerializer(serializers.ModelSerializer):
-    actor = serializers.SerializerMethodField()
-
-    class Meta:
-        model = TodoActivity
-        fields = [
-            "id",
-            "event_type",
-            "description",
-            "metadata",
-            "actor",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-    def get_actor(self, obj):
-        if obj.actor is None:
-            return None
-
-        return {
-            "id": obj.actor_id,
-            "username": obj.actor.username,
-            "first_name": obj.actor.first_name,
-            "last_name": obj.actor.last_name,
-        }
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_actor_name(self, obj):
+        return display_name(obj.actor) if obj.actor else None

@@ -1,144 +1,114 @@
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
+from django.db import transaction
+from django.utils import timezone
 
-from todos.models import Team, UserProfile, Todo
-
+from todos.models import Team, UserProfile
+from todos.services import team_service, todo_service
 
 User = get_user_model()
 
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_PASSWORD = "Admin@2026Demo"
+USER_PASSWORD = "Demo@2026Pass"
+
 
 class Command(BaseCommand):
-    help = "Create predefined teams and demo users/todos."
+    help = "Create a demo organisation: 1 admin, 3 teams, PMs, members and tasks."
 
+    @transaction.atomic
     def handle(self, *args, **options):
-        self.stdout.write("Seeding demo data...")
+        if Team.objects.exists():
+            self.stdout.write("Demo data already present - nothing to do.")
+            return
 
-        # 1. Create predefined teams.
-        alpha, _ = Team.objects.get_or_create(
-            name="Team Alpha",
-            defaults={"description": "Primary demo team."},
+        admin = self._user("Olivia Owner", ADMIN_EMAIL, ADMIN_PASSWORD, admin=True)
+
+        people = {
+            key: self._user(name, f"{key}@example.com", USER_PASSWORD)
+            for key, name in {
+                "priya": "Priya Nair",
+                "omar": "Omar Haddad",
+                "lena": "Lena Fischer",
+                "jonas": "Jonas Weber",
+                "mei": "Mei Tanaka",
+                "sam": "Sam Rivera",
+                "ana": "Ana Costa",
+                "tomas": "Tomas Novak",
+            }.items()
+        }
+
+        atlas = team_service.create_team(
+            actor=admin, name="Atlas · Website", color="blue", pm=people["priya"],
+            description="Marketing website relaunch.",
+        )
+        beacon = team_service.create_team(
+            actor=admin, name="Beacon · Mobile", color="orange", pm=people["omar"],
+            description="Customer mobile app.",
+        )
+        compass = team_service.create_team(
+            actor=admin, name="Compass · Operations", color="teal", pm=people["lena"],
+            description="Internal tooling and operations.",
         )
 
-        beta, _ = Team.objects.get_or_create(
-            name="Team Beta",
-            defaults={"description": "Secondary demo team."},
+        team_service.add_members(
+            actor=admin, team=atlas,
+            users=[people["omar"], people["jonas"], people["mei"], people["ana"]],
         )
-
-        self.stdout.write(self.style.SUCCESS("Teams ready."))
-
-        # 2. Find an existing admin. If none exists, create one.
-        admin_profile = (
-            UserProfile.objects
-            .filter(role=UserProfile.Role.ADMIN)
-            .select_related("user")
-            .first()
+        team_service.add_members(
+            actor=admin, team=beacon,
+            users=[people["priya"], people["jonas"], people["tomas"]],
         )
+        team_service.add_members(
+            actor=admin, team=compass, users=[people["mei"], people["tomas"]],
+        )
+        # `sam` signed up but has not been added anywhere yet.
 
-        if admin_profile:
-            admin = admin_profile.user
-        else:
-            admin, created = User.objects.get_or_create(
-                username="demo_admin",
-                defaults={"email": "admin@example.com"},
+        today = timezone.localdate()
+        P = people
+
+        def todo(team, pm, title, desc, who, priority="MEDIUM", due=None, status=None):
+            t = todo_service.create_todo(
+                actor=pm, team=team, title=title, description=desc,
+                priority=priority, due_date=due, assignee_ids=[u.id for u in who],
             )
+            if status:
+                todo_service.change_status(actor=who[0], todo=t, status=status)
+            return t
 
-            if created:
-                admin.set_password("Admin@2026Demo")
-                admin.save()
+        todo(atlas, P["priya"], "Design new homepage hero", "Three concepts for review.",
+             [P["mei"]], "HIGH", today + timedelta(days=3), "IN_PROGRESS")
+        todo(atlas, P["priya"], "Migrate blog content", "Move posts to the new CMS.",
+             [P["jonas"], P["ana"]], "MEDIUM", today + timedelta(days=10))
+        todo(atlas, P["priya"], "Accessibility audit", "WCAG 2.2 AA pass on key pages.",
+             [P["omar"]], "HIGH", today - timedelta(days=2))
+        todo(atlas, P["priya"], "Write launch announcement", "Draft + legal review.",
+             [P["ana"]], "LOW", today + timedelta(days=14), "COMPLETED")
+        todo(beacon, P["omar"], "Push notification service", "Integrate provider SDK.",
+             [P["jonas"]], "HIGH", today + timedelta(days=5), "IN_PROGRESS")
+        todo(beacon, P["omar"], "Onboarding flow QA", "Test on iOS and Android.",
+             [P["tomas"], P["priya"]], "MEDIUM", today + timedelta(days=7))
+        todo(beacon, P["omar"], "App store listing copy", "Screenshots and descriptions.",
+             [P["priya"]], "LOW", None, "COMPLETED")
+        todo(compass, P["lena"], "Automate weekly report", "Pull metrics into a dashboard.",
+             [P["mei"], P["tomas"]], "MEDIUM", today + timedelta(days=6))
+        todo(compass, P["lena"], "Vendor contract review", "Renewals due this quarter.",
+             [P["lena"]], "HIGH", today + timedelta(days=2), "IN_PROGRESS")
 
-            profile, _ = UserProfile.objects.get_or_create(
-                user=admin,
-                defaults={"role": UserProfile.Role.ADMIN},
-            )
-            profile.role = UserProfile.Role.ADMIN
-            profile.save(update_fields=["role"])
+        self.stdout.write(self.style.SUCCESS("Demo data created."))
+        self.stdout.write(f"  Admin: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+        self.stdout.write(f"  Users: priya@ omar@ lena@ jonas@ mei@ sam@ ana@ tomas@example.com / {USER_PASSWORD}")
+        self.stdout.write("  Priya is PM of Atlas and a member of Beacon; Omar is the reverse.")
+        self.stdout.write("  Sam has no team yet - add them from Admin > Users.")
 
-        # 3. Create demo members.
-        demo_members = [
-            {
-                "username": "alice",
-                "email": "alice@example.com",
-                "password": "Alice@2026Secure",
-                "team": alpha,
-            },
-            {
-                "username": "bob",
-                "email": "bob@example.com",
-                "password": "Bob@2026Secure",
-                "team": alpha,
-            },
-            {
-                "username": "charlie",
-                "email": "charlie@example.com",
-                "password": "Charlie@2026Secure",
-                "team": beta,
-            },
-        ]
-
-        members = {}
-
-        for item in demo_members:
-            user, created = User.objects.get_or_create(
-                username=item["username"],
-                defaults={"email": item["email"]},
-            )
-
-            if created:
-                user.set_password(item["password"])
-                user.save()
-
-            profile, _ = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    "role": UserProfile.Role.MEMBER,
-                    "team": item["team"],
-                },
-            )
-
-            # Only assign a team when the user has none.
-            if profile.team is None:
-                profile.team = item["team"]
-                profile.save(update_fields=["team"])
-
-            members[item["username"]] = user
-
-        # 4. Assign the admin to Team Alpha only if unassigned.
-        admin_profile = admin.profile
-
-        if admin_profile.team is None:
-            admin_profile.team = alpha
-            admin_profile.save(update_fields=["team"])
-
-        self.stdout.write(self.style.SUCCESS("Demo users ready."))
-
-        # 5. Create sample todos without duplicating them.
-        alice = members["alice"]
-        bob = members["bob"]
-
-        Todo.objects.get_or_create(
-            user=admin,
-            title="Prepare programming workshop",
-            defaults={
-                "description": "Prepare materials for the programming workshop.",
-                "team": alpha,
-                "assignee": alice,
-                "task_status": Todo.TaskStatus.PENDING,
-                "assignment_status": Todo.AssignmentStatus.PENDING,
-            },
+    def _user(self, name, email, password, admin=False):
+        parts = name.split()
+        user = User.objects.create_user(
+            username=email.split("@")[0], email=email, password=password,
+            first_name=parts[0], last_name=" ".join(parts[1:]),
         )
-
-        Todo.objects.get_or_create(
-            user=alice,
-            title="Review workshop problems",
-            defaults={
-                "description": "Review the selected programming problems.",
-                "team": alpha,
-                "assignee": bob,
-                "task_status": Todo.TaskStatus.PENDING,
-                "assignment_status": Todo.AssignmentStatus.PENDING,
-            },
-        )
-
-        self.stdout.write(self.style.SUCCESS("Sample todos ready."))
-        self.stdout.write(self.style.SUCCESS("Demo seeding completed."))
+        if admin:
+            UserProfile.objects.filter(user=user).update(role=UserProfile.Role.ADMIN)
+        return user

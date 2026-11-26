@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<body style="margin:0;padding:24px;background:#f3f4fa;font-family:Segoe UI,Arial,sans-serif;color:#1a1f36;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
+    <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #e0e3ee;border-radius:6px;">
+      <tr><td style="padding:14px 24px;background:#161b3a;color:#ffffff;font-weight:700;border-radius:6px 6px 0 0;">Teamboard
+        <span style="float:right;font-weight:600;color:#fff;background:{{ team_color|default:'#3946d6' }};padding:2px 8px;border-radius:3px;font-size:12px;">{{ team_name }}</span></td></tr>
+      <tr><td style="padding:24px;font-size:14px;line-height:1.55;">
+        {% block content %}{% endblock %}
+      </td></tr>
+      <tr><td style="padding:14px 24px;border-top:1px solid #e0e3ee;color:#7a849f;font-size:12px;">
+        You are receiving this because of your role in {{ team_name }} on Teamboard.
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body>
+</html>

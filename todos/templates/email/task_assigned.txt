@@ -1,0 +1,13 @@
+Hi {{ recipient_name }},
+
+{{ actor_name }} assigned you a task in {{ team_name }}.
+
+{{ title }}
+{% if description %}{{ description }}
+{% endif %}
+Priority: {{ priority }}
+Due: {{ due_date }}
+Assigned to: {{ assignees }}
+Project manager: {{ pm_name }}
+
+Open the task: {{ url }}

@@ -123,7 +123,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# 10 PM daily digests are evaluated in this timezone (e.g. Asia/Dhaka).
+TIME_ZONE = os.getenv('TIME_ZONE', 'UTC')
 
 USE_I18N = True
 
@@ -151,8 +152,8 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'The Scroll of Procrastination API',
-    'DESCRIPTION': 'A TODO management REST API with JWT authentication.',
+    'TITLE': 'Teamboard API',
+    'DESCRIPTION': 'Team-based task management: admin-managed teams, one PM per team, assignee-driven status.',
     'VERSION': '1.0.0',
 }
 
@@ -188,3 +189,18 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
 }
+
+# ---------------------------------------------------------------- email
+# Default: print emails to the server console (demo). Set EMAIL_BACKEND to
+# django.core.mail.backends.smtp.EmailBackend and fill in the EMAIL_* values
+# in .env to send real mail.
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Teamboard <noreply@teamboard.local>')
+
+# Used to build links to tasks inside emails.
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')

@@ -8,3 +8,17 @@ services:
       - .:/app
     ports:
       - "8000:8000"
+
+  # Sends the daily PM digest at 22:00 container time. Set TZ to your timezone.
+  scheduler:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - TZ=UTC
+    volumes:
+      - .:/app
+    command: >
+      sh -c 'while true; do
+      if [ "$$(date +%H%M)" = "2200" ]; then python manage.py send_daily_digest; sleep 61; fi;
+      sleep 20; done'

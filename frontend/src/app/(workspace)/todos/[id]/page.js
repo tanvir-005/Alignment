@@ -1,454 +1,188 @@
-
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { api, useFetch } from "@/lib/api";
+import { STATUSES, formatDate, formatDateTime } from "@/lib/format";
+import { teamColor } from "@/lib/teamColors";
+import { useUser } from "@/lib/user-context";
+import { useToast } from "@/components/ui/Toast";
+import { Avatar, ConfirmDialog, ErrorNote, Loading, PriorityBadge, StatusBadge, TeamTag } from "@/components/ui/ui";
+import TodoFormModal from "@/components/todos/TodoFormModal";
 import styles from "./page.module.css";
-import TodoAssignmentPanel from "@/features/todos/TodoAssignmentPanel";
 
-function formatDate(value) {
-  if (!value) return "—";
+export default function TodoDetailPage({ params }) {
+  const { id } = use(params);
+  const user = useUser();
+  const router = useRouter();
+  const toast = useToast();
 
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
+  const todo = useFetch(`/todos/${id}`);
+  const activity = useFetch(`/todos/${id}/activities`);
+  const t = todo.data;
+  const team = useFetch(t?.can_edit ? `/teams/${t.team.id}` : null);
 
-function formatStatus(value) {
-  return value?.replaceAll("_", " ").toLowerCase() || "unknown";
-}
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-function getActorName(actor) {
-  if (!actor) return "Former user";
+  const backHref = user.is_admin ? `/admin/teams/${t?.team.id ?? ""}` : `/teams/${t?.team.id ?? ""}`;
 
-  const fullName = [actor.first_name, actor.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  return fullName || actor.username;
-}
-
-function getEventLabel(eventType) {
-  const labels = {
-    CREATED: "Task created",
-    UPDATED: "Task updated",
-    ASSIGNED: "Task assigned",
-    ASSIGNMENT_ACCEPTED: "Assignment accepted",
-    ASSIGNMENT_REJECTED: "Assignment rejected",
-    STATUS_CHANGED: "Status changed",
-  };
-
-  return labels[eventType] || formatStatus(eventType);
-}
-
-function getActivityDetails(activity) {
-  const metadata = activity.metadata || {};
-
-  if (activity.event_type === "STATUS_CHANGED") {
-    return `${formatStatus(metadata.old_status)} → ${formatStatus(
-      metadata.new_status
-    )}`;
-  }
-
-  if (activity.event_type === "ASSIGNED") {
-    return metadata.assignee_username
-      ? `Assigned to ${metadata.assignee_username}`
-      : "";
-  }
-
-  if (activity.event_type === "UPDATED" && metadata.changes) {
-    return Object.keys(metadata.changes)
-      .map((field) => field.replaceAll("_", " "))
-      .join(", ");
-  }
-
-  return "";
-}
-
-export default function TodoDetailPage() {
-  const { id } = useParams();
-
-  const [todo, setTodo] = useState(null);
-  const [user, setUser] = useState(null);
-
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-
-  const [activities, setActivities] = useState([]);
-  const [activityTotal, setActivityTotal] = useState(0);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [activityError, setActivityError] = useState("");
-  const [loadingMoreActivities, setLoadingMoreActivities] = useState(false);
-  const [hasMoreActivities, setHasMoreActivities] = useState(false);
-  const [activityPage, setActivityPage] = useState(1);
-
-  const loadActivities = useCallback(
-    async (page = 1, append = false) => {
-      if (append) {
-        setLoadingMoreActivities(true);
-      } else {
-        setActivityLoading(true);
-      }
-
-      setActivityError("");
-
-      try {
-        const response = await fetch(
-          `/api/todos/${id}/activities/?page=${page}`,
-          { cache: "no-store" }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.detail ||
-              data.error ||
-              "Unable to load task activity."
-          );
-        }
-
-        const results = Array.isArray(data)
-          ? data
-          : data.results || [];
-        
-        setActivityTotal(
-          Array.isArray(data) ? data.length : data.count || 0
-        );
-
-        setActivities((current) =>
-          append ? [...current, ...results] : results
-        );
-
-        setHasMoreActivities(
-          !Array.isArray(data) && Boolean(data.next)
-        );
-
-        setActivityPage(page);
-      } catch (err) {
-        setActivityError(
-          err.message || "Unable to load task activity."
-        );
-      } finally {
-        setActivityLoading(false);
-        setLoadingMoreActivities(false);
-      }
-    },
-    [id]
-  );
-
-  const loadTodo = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const [todoResponse, userResponse] = await Promise.all([
-        fetch(`/api/todos/${id}/`, { cache: "no-store" }),
-        fetch("/api/auth/me", { cache: "no-store" }),
-      ]);
-
-      const todoData = await todoResponse.json();
-
-      if (!todoResponse.ok) {
-        throw new Error(
-          todoData.detail || todoData.error || "Unable to load task."
-        );
-      }
-
-      const userData = userResponse.ok
-        ? await userResponse.json()
-        : null;
-
-      setTodo(todoData);
-      setUser(userData);
-      setTitle(todoData.title);
-      setDescription(todoData.description || "");
-
-      await loadActivities(1, false);
-    } catch (err) {
-      setError(err.message || "Something went wrong.");
-    } finally {
-      setLoading(false);
-    }
-  }, [id, loadActivities]);
-
-  useEffect(() => {
-    loadTodo();
-  }, [loadTodo]);
-
-  const isCreator = todo && user?.id === todo.creator;
-  const isAssignee = todo && user?.id === todo.assignee;
-
-  const canEdit =
-    todo &&
-    user?.role !== "ADMIN" &&
-    (todo.assignee ? isAssignee : isCreator);
-
-  async function handleSave(event) {
-    event.preventDefault();
-
-    setSaving(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const response = await fetch(`/api/todos/${id}/`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || data.error || "Unable to update task."
-        );
-      }
-
-      setTodo(data);
-      setSuccess("Task updated successfully.");
-
-      await loadActivities(1, false);
-    } catch (err) {
-      setError(err.message || "Something went wrong.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleLoadMore() {
-    if (!hasMoreActivities || loadingMoreActivities) return;
-
-    await loadActivities(activityPage + 1, true);
-  }
-
-  if (loading) {
-    return <div className={styles.state}>Loading task...</div>;
-  }
-
-  if (error && !todo) {
+  if (todo.loading && !t) return <Loading />;
+  if (todo.error) {
     return (
-      <div className={styles.state}>
-        <p className={styles.error}>{error}</p>
-        <Link href="/todos" className={styles.backLink}>
-          Back to tasks
-        </Link>
+      <div className="page">
+        <ErrorNote error={todo.error.status === 404 ? { message: "This task does not exist, or you cannot access it." } : todo.error} />
+        <p style={{ marginTop: 14 }}><Link href="/">← Back</Link></p>
       </div>
     );
   }
 
-  if (!todo) return null;
+  async function setStatus(status) {
+    if (status === t.status) return;
+    setBusy(true);
+    try {
+      const updated = await api(`/todos/${t.id}/status`, { method: "PATCH", body: { status } });
+      todo.setData(updated);
+      activity.reload({ silent: true });
+      toast.success("Status updated.");
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await api(`/todos/${t.id}`, { method: "DELETE" });
+      toast.success("Task deleted.");
+      router.replace(backHref);
+    } catch (e) {
+      toast.error(e.message);
+      setBusy(false);
+      setDeleting(false);
+    }
+  }
 
   return (
-    <section className={styles.page}>
-      <Link href="/todos" className={styles.backLink}>
-        ← Back to tasks
-      </Link>
+    <div className="page">
+      <Link href={backHref} className={styles.back}>← {t.team.name}</Link>
 
-      <div className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>TASK / #{todo.id}</p>
-          <h1>{todo.title}</h1>
-          <p className={styles.subtitle}>
-            {isCreator
-              ? "Created by you"
-              : isAssignee
-                ? "Assigned to you"
-                : "Task details"}
-          </p>
+      <div className={styles.head} style={{ "--team": teamColor(t.team.color) }}>
+        <div className={styles.badges}>
+          <TeamTag team={t.team} />
+          <PriorityBadge priority={t.priority} />
+          {t.is_overdue && <span className="badge p-HIGH">Overdue</span>}
         </div>
+        <h1>{t.title}</h1>
 
-        <span className={styles.status}>
-          {formatStatus(todo.task_status)}
-        </span>
-      </div>
-
-      {error && <p className={styles.error}>{error}</p>}
-      {success && <p className={styles.success}>{success}</p>}
-
-      <div className={styles.content}>
-        <form className={styles.mainPanel} onSubmit={handleSave}>
-          <div className={styles.panelHeader}>
-            <h2>Task details</h2>
-            <span>{canEdit ? "Editable" : "Read only"}</span>
-          </div>
-
-          <label htmlFor="title">Title</label>
-          <input
-            id="title"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            disabled={!canEdit}
-            maxLength={255}
-            required
-          />
-
-          <label htmlFor="description">Description</label>
-          <textarea
-            id="description"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            disabled={!canEdit}
-            rows={8}
-          />
-
-          {canEdit && (
-            <div className={styles.actions}>
-              <button
-                type="submit"
-                className={styles.primaryButton}
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save changes"}
-              </button>
-            </div>
-          )}
-        </form>
-
-        <aside className={styles.sidePanel}>
-          <h2>Information</h2>
-
-          <div className={styles.infoItem}>
-            <span>Creator</span>
-            <strong>{todo.creator}</strong>
-          </div>
-
-          <div className={styles.infoItem}>
-            <span>Assignee</span>
-            <strong>{todo.assignee ?? "Unassigned"}</strong>
-          </div>
-
-          <div className={styles.infoItem}>
-            <span>Assignment status</span>
-            <strong>
-              {todo.assignment_status
-                ? todo.assignment_status.toLowerCase()
-                : "Not assigned"}
-            </strong>
-          </div>
-
-          <div className={styles.infoItem}>
-            <span>Created</span>
-            <strong>{formatDate(todo.created_at)}</strong>
-          </div>
-
-          <div className={styles.infoItem}>
-            <span>Last updated</span>
-            <strong>{formatDate(todo.updated_at)}</strong>
-          </div>
-        </aside>
-
-        <TodoAssignmentPanel
-          todo={todo}
-          user={user}
-          onUpdated={loadTodo}
-        />
-      </div>
-
-      <section className={styles.activityPanel}>
-        <div className={styles.activityHeader}>
-          <div>
-            <h2>Activity</h2>
-            <p>History of changes and actions on this task.</p>
-          </div>
-
-          <span className={styles.activityCount}>
-            {activityTotal} activities
-          </span>
-        </div>
-
-        {activityLoading ? (
-          <div className={styles.activityState}>
-            Loading activity...
-          </div>
-        ) : activityError ? (
-          <div className={styles.activityState}>
-            <p className={styles.error}>{activityError}</p>
-            <button
-              type="button"
-              className={styles.loadMoreButton}
-              onClick={() => loadActivities(1, false)}
-            >
-              Try again
-            </button>
-          </div>
-        ) : activities.length === 0 ? (
-          <div className={styles.activityState}>
-            No activity recorded yet.
-          </div>
-        ) : (
-          <>
-            <ol className={styles.timeline}>
-              {activities.map((activity) => {
-                const details = getActivityDetails(activity);
-
-                return (
-                  <li className={styles.timelineItem} key={activity.id}>
-                    <span
-                      className={styles.timelineMarker}
-                      aria-hidden="true"
-                    />
-
-                    <div className={styles.timelineContent}>
-                      <div className={styles.timelineTop}>
-                        <strong>
-                          {getEventLabel(activity.event_type)}
-                        </strong>
-                        <time dateTime={activity.created_at}>
-                          {formatDate(activity.created_at)}
-                        </time>
-                      </div>
-
-                      <p className={styles.activityDescription}>
-                        {activity.description}
-                      </p>
-
-                      {details && (
-                        <p className={styles.activityDetails}>
-                          {details}
-                        </p>
-                      )}
-
-                      <span className={styles.activityActor}>
-                        {getActorName(activity.actor)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-
-            {hasMoreActivities && (
-              <div className={styles.loadMoreWrapper}>
-                <button
-                  type="button"
-                  className={styles.loadMoreButton}
-                  onClick={handleLoadMore}
-                  disabled={loadingMoreActivities}
-                >
-                  {loadingMoreActivities
-                    ? "Loading..."
-                    : "Load older activity"}
-                </button>
+        <div className={styles.status}>
+          {t.can_change_status ? (
+            <>
+              <div className="segmented" role="group" aria-label="Status">
+                {STATUSES.map((s) => (
+                  <button key={s.value} aria-pressed={t.status === s.value} disabled={busy} onClick={() => setStatus(s.value)}>
+                    {s.label}
+                  </button>
+                ))}
               </div>
-            )}
-          </>
-        )}
-      </section>
-    </section>
+              <small>You can change this status.</small>
+            </>
+          ) : (
+            <>
+              <StatusBadge status={t.status} />
+              <small>
+                {user.is_admin
+                  ? "Read-only: administrators observe but do not change tasks."
+                  : "Only assignees and the project manager can change the status."}
+              </small>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.layout}>
+        <div className="stack">
+          <section className="card">
+            <div className="card-head">
+              <h2>Description</h2>
+              {t.can_edit && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-sm" onClick={() => setEditing(true)} disabled={!team.data}>Edit</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => setDeleting(true)}>Delete</button>
+                </div>
+              )}
+            </div>
+            <div className="card-pad">
+              {t.description ? <p className={styles.desc}>{t.description}</p> : <p className="muted">No description.</p>}
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-head"><h2>Activity</h2></div>
+            <div className="card-pad">
+              {activity.loading && !activity.data ? (
+                <Loading />
+              ) : (
+                <ul className={styles.timeline}>
+                  {(activity.data ?? []).map((a) => (
+                    <li key={a.id} className={styles[`ev-${a.event_type}`]}>
+                      {a.description}
+                      <time>{formatDateTime(a.created_at)}</time>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <aside className="card card-pad">
+          <dl className={styles.meta} style={{ margin: 0 }}>
+            <div>
+              <dt>Assignees</dt>
+              <dd>
+                <div className={styles.people}>
+                  {t.assignees.map((a) => (
+                    <div key={a.id} className={styles.person}>
+                      <Avatar name={a.name} />
+                      <span>{a.name}{a.id === user.id ? " (you)" : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              </dd>
+            </div>
+            <div><dt>Due date</dt><dd style={{ color: t.is_overdue ? "var(--danger)" : undefined, fontWeight: t.is_overdue ? 700 : 400 }}>{formatDate(t.due_date)}</dd></div>
+            <div><dt>Created by</dt><dd>{t.created_by ? <><Avatar name={t.created_by.name} /> {t.created_by.name}</> : "—"}</dd></div>
+            <div><dt>Created</dt><dd>{formatDateTime(t.created_at)}</dd></div>
+            <div><dt>Last updated</dt><dd>{formatDateTime(t.updated_at)}</dd></div>
+            {t.completed_at && <div><dt>Completed</dt><dd>{formatDateTime(t.completed_at)}</dd></div>}
+          </dl>
+        </aside>
+      </div>
+
+      {editing && team.data && (
+        <TodoFormModal
+          team={team.data}
+          members={team.data.members}
+          todo={t}
+          onClose={() => setEditing(false)}
+          onSaved={(saved) => {
+            setEditing(false);
+            todo.setData(saved);
+            activity.reload({ silent: true });
+          }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDialog title="Delete this task?" confirmLabel="Delete task" danger busy={busy} onConfirm={remove} onClose={() => setDeleting(false)}>
+          “{t.title}” will be removed for everyone on the team. This cannot be undone.
+        </ConfirmDialog>
+      )}
+    </div>
   );
 }

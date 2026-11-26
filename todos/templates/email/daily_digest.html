@@ -1,0 +1,20 @@
+{% extends "email/base.html" %}
+{% block content %}
+<p style="margin:0 0 12px;">Hi {{ recipient_name }},</p>
+<p style="margin:0 0 16px;">Here is what changed in <b>{{ team_name }}</b> in the last {{ hours }} hours ({{ window }}).</p>
+<table role="presentation" cellspacing="6" cellpadding="0" style="margin-bottom:18px;"><tr>
+  {% for label, value in counts %}<td style="background:#f3f4fa;border-radius:4px;padding:8px 12px;text-align:center;"><div style="font-size:20px;font-weight:700;">{{ value }}</div><div style="font-size:11px;color:#7a849f;">{{ label }}</div></td>{% endfor %}
+</tr></table>
+{% for task in tasks %}
+  <div style="border-left:3px solid {{ team_color }};padding:2px 0 2px 12px;margin-bottom:12px;">
+    <a href="{{ task.url }}" style="font-weight:600;color:#1a1f36;text-decoration:none;">{{ task.title }}</a>
+    {% for e in task.events %}<div style="font-size:13px;color:#49526e;">{{ e.time }} &middot; {{ e.text }}</div>{% endfor %}
+  </div>
+{% endfor %}
+{% if more_tasks %}<p style="color:#7a849f;">…and {{ more_tasks }} more task{{ more_tasks|pluralize }}.</p>{% endif %}
+{% if deleted %}<p style="margin:16px 0 4px;font-weight:600;">Deleted</p>
+  {% for d in deleted %}<div style="font-size:13px;color:#49526e;">{{ d.time }} &middot; {{ d.text }}</div>{% endfor %}{% endif %}
+<p style="margin:18px 0 6px;font-weight:600;">Team right now</p>
+<p style="margin:0 0 18px;color:#49526e;">{{ now_pending }} pending · {{ now_progress }} in progress · {{ now_done }} completed{% if overdue %} · <b style="color:#d6303f;">{{ overdue }} overdue</b>{% endif %}</p>
+<a href="{{ url }}" style="display:inline-block;background:#3946d6;color:#ffffff;text-decoration:none;padding:9px 16px;border-radius:5px;font-weight:600;">Open team</a>
+{% endblock %}

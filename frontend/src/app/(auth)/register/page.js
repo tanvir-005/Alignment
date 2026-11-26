@@ -1,60 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import styles from "./page.module.css";
+import styles from "../auth.module.css";
 
 export default function RegisterPage() {
-  const router = useRouter();
-
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
 
-  async function handleSubmit(event) {
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  async function submit(event) {
     event.preventDefault();
     setError("");
-
-    if (password.length < 8) {
-      setError("Password must contain at least 8 characters.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
     setLoading(true);
-
     try {
       const response = await fetch("/api/auth/register", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name, email, password }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
-
       const data = await response.json();
-
       if (!response.ok) {
-        const message =
-          data.error ||
-          data.detail ||
-          (Array.isArray(data.email) ? data.email[0] : null) ||
-          "Unable to create your account.";
-
-        setError(message);
+        setError(data.error || "Unable to create the account.");
         return;
       }
-
-      router.push("/login?registered=true");
+      setDone(true);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -62,135 +35,52 @@ export default function RegisterPage() {
     }
   }
 
-  return (
-    <main className={styles.page}>
-      <header className={styles.header}>
-        <Link href="/login" className={styles.brand}>
-          TODO WORKSPACE
+  if (done) {
+    return (
+      <div className={`${styles.card} ${styles.success}`}>
+        <div className={styles.tick}>✓</div>
+        <h2>Account created</h2>
+        <p className={styles.sub}>
+          Sign in now. An administrator will add you to a team, and your tasks
+          will appear as soon as they do.
+        </p>
+        <Link href="/login" className="btn btn-primary" style={{ width: "100%", height: 38 }}>
+          Go to sign in
         </Link>
+      </div>
+    );
+  }
 
-        <span className={styles.headerLabel}>
-          PERSONAL PRODUCTIVITY
-        </span>
-      </header>
+  return (
+    <div className={styles.card}>
+      <h2>Create your account</h2>
+      <p className={styles.sub}>An administrator will add you to a team after you sign up.</p>
 
-      <section className={styles.content}>
-        <div className={styles.intro}>
-          <span className={styles.eyebrow}>GET STARTED</span>
+      <form onSubmit={submit}>
+        {error && <div className="error-note" role="alert" style={{ marginBottom: 14 }}>{error}</div>}
 
-          <h1>
-            Make room
-            <br />
-            for better work.
-          </h1>
-
-          <p>
-            Create your account and start organizing
-            <br className={styles.desktopBreak} />
-            your work in one place.
-          </p>
+        <div className="field">
+          <label className="label" htmlFor="name">Full name</label>
+          <input id="name" className="input" required autoComplete="name" value={form.name} onChange={set("name")} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="email">Work email</label>
+          <input id="email" className="input" type="email" required autoComplete="email" value={form.email} onChange={set("email")} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="password">Password</label>
+          <input id="password" className="input" type="password" required autoComplete="new-password" value={form.password} onChange={set("password")} />
+          <span className="hint">At least 8 characters, not too common.</span>
         </div>
 
-        <div className={styles.formSection}>
-          <div className={styles.formHeading}>
-            <h2>Create an account</h2>
-            <p>Enter your details to get started.</p>
-          </div>
+        <button className="btn btn-primary" style={{ width: "100%", height: 38 }} disabled={loading}>
+          {loading ? "Creating…" : "Create account"}
+        </button>
+      </form>
 
-          <form onSubmit={handleSubmit} className={styles.form}>
-            <div className={styles.field}>
-              <label htmlFor="name">Full name</label>
-
-              <input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="Enter your full name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                autoComplete="name"
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="email">Email address</label>
-
-              <input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="password">Password</label>
-
-              <input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="At least 8 characters"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="confirmPassword">Confirm password</label>
-
-              <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                placeholder="Enter your password again"
-                value={confirmPassword}
-                onChange={(event) =>
-                  setConfirmPassword(event.target.value)
-                }
-                autoComplete="new-password"
-                required
-                disabled={loading}
-              />
-            </div>
-
-            {error && (
-              <p className={styles.error} role="alert">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className={styles.submitButton}
-              disabled={loading}
-            >
-              {loading ? "Creating account..." : "Create account"}
-            </button>
-          </form>
-
-          <p className={styles.login}>
-            Already have an account?{" "}
-            <Link href="/login">Sign in</Link>
-          </p>
-        </div>
-      </section>
-
-      <footer className={styles.footer}>
-        <span>TODO WORKSPACE</span>
-        <span>© 2026</span>
-      </footer>
-    </main>
+      <p className={styles.footer}>
+        Already have an account? <Link href="/login">Sign in</Link>
+      </p>
+    </div>
   );
 }

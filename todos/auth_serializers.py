@@ -1,61 +1,56 @@
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from rest_framework import serializers
-from .models import UserProfile
 from django.db import transaction
+from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-class RegisterSerializer(serializers.ModelSerializer):
+from .models import UserProfile
+
+User = get_user_model()
+
+
+class RegisterSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150)
-    password = serializers.CharField(
-        write_only=True,
-        validators=[validate_password]
-    )
-
-    class Meta:
-        model = User
-        fields = ['name', 'email', 'password']
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, validators=[validate_password])
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError(
-                "This email is already registered."
-            )
-        return value
+            raise serializers.ValidationError("This email is already registered.")
+        return value.lower()
 
     @transaction.atomic
     def create(self, validated_data):
-        name = validated_data.pop('name')
-        email = validated_data['email']
+        name = validated_data["name"].strip()
+        email = validated_data["email"]
 
-        # Determine whether this is the first registered user.
-        is_first_user = not User.objects.exists()
-
-        base_username = email.split('@')[0]
-        username = base_username
-        counter = 1
-
+        base = email.split("@")[0][:140]
+        username, counter = base, 1
         while User.objects.filter(username=username).exists():
-            username = f"{base_username}{counter}"
+            username = f"{base}{counter}"
             counter += 1
 
-        first_name = name.split()[0]
-        last_name = ' '.join(name.split()[1:])
-
+        parts = name.split()
         user = User.objects.create_user(
             username=username,
             email=email,
-            password=validated_data['password'],
-            first_name=first_name,
-            last_name=last_name,
+            password=validated_data["password"],
+            first_name=parts[0],
+            last_name=" ".join(parts[1:]),
         )
-
-        UserProfile.objects.create(
-            user=user,
-            role=(
-                UserProfile.Role.ADMIN
-                if is_first_user
-                else UserProfile.Role.MEMBER
-            ),
-        )
-
+        # Everyone who signs up is a plain user; admins are created by the owner
+        # (`manage.py createadmin`). Team membership is granted by an admin.
+        UserProfile.objects.get_or_create(user=user, defaults={"role": UserProfile.Role.USER})
         return user
+
+
+class EmailOrUsernameTokenSerializer(TokenObtainPairSerializer):
+    """Lets people sign in with their email address (or username)."""
+
+    def validate(self, attrs):
+        identifier = attrs.get(self.username_field, "")
+        if "@" in identifier:
+            match = User.objects.filter(email__iexact=identifier).first()
+            if match:
+                attrs[self.username_field] = match.get_username()
+        return super().validate(attrs)

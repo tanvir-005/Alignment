@@ -1,0 +1,29 @@
+.shell { min-height: 100vh; display: grid; grid-template-columns: minmax(340px, 5fr) 6fr; }
+.brandPanel {
+  background: var(--ink); color: #fff; padding: 44px 48px; display: flex; flex-direction: column;
+  justify-content: space-between; gap: 32px; position: relative; overflow: hidden;
+}
+.brandPanel h1 { font-size: 38px; line-height: 1.1; margin: 28px 0 14px; letter-spacing: -0.02em; }
+.brandPanel p { color: var(--ink-text); max-width: 380px; font-size: 15px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; letter-spacing: -0.01em; }
+.logoMark { width: 22px; height: 22px; border-radius: 4px; background: linear-gradient(135deg, #e0561b 0 33%, #c98200 33% 66%, #2b9a4b 66%); }
+.mosaic { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; width: 168px; }
+.mosaic span { aspect-ratio: 1; border-radius: 3px; }
+.points { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; color: var(--ink-text); font-size: 13.5px; }
+.points b { color: #fff; }
+.formPanel { display: grid; place-items: center; padding: 32px 24px; background: var(--bg); }
+.card { width: 100%; max-width: 400px; }
+.card h2 { font-size: 24px; margin-bottom: 6px; }
+.card .sub { color: var(--text-2); margin-bottom: 24px; }
+.footer { margin-top: 18px; color: var(--text-2); font-size: 13px; text-align: center; }
+.success { text-align: center; }
+.success .tick {
+  width: 48px; height: 48px; border-radius: var(--r-lg); margin: 0 auto 14px; display: grid; place-items: center;
+  font-size: 24px; color: #fff; background: var(--done);
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .brandPanel { padding: 24px; }
+  .brandPanel h1 { font-size: 26px; margin-top: 16px; }
+  .mosaic, .points { display: none; }
+}

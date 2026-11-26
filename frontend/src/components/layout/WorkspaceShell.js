@@ -1,224 +1,170 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+import { UserContext } from "@/lib/user-context";
+import { ToastProvider } from "@/components/ui/Toast";
+import { Avatar, Loading, TeamDot } from "@/components/ui/ui";
 import styles from "./WorkspaceShell.module.css";
-  
-  const navigation = [
-  {
-    label: "WORKSPACE",
-    items: [
-      { name: "My tasks", href: "/todos" },
-      { name: "Kanban", href: "/kanban" },
-      { name: "Notifications", href: "/notifications" },
-    ],
-  },
-  {
-    label: "MANAGEMENT",
-    items: [{ name: "Administration", href: "/admin" }],
-  },
+
+const ADMIN_NAV = [
+  { name: "Overview", href: "/admin", glyph: "▦" },
+  { name: "Teams", href: "/admin/teams", glyph: "◈" },
+  { name: "People", href: "/admin/users", glyph: "☺" },
+  { name: "All tasks", href: "/admin/todos", glyph: "☰" },
 ];
 
 export default function WorkspaceShell({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unread, setUnread] = useState(0);
+  const [open, setOpen] = useState(false);
 
-  
+  // Load the current user once; everything role-based hangs off it.
   useEffect(() => {
-    let active = true;
-
-    async function loadUnreadCount() {
-      // Do not poll while the browser tab is hidden.
-      if (document.visibilityState === "hidden") return;
-
-      try {
-        const response = await fetch(
-          "/api/notifications/unread-count/",
-          { cache: "no-store" }
-        );
-
-        if (!response.ok) return;
-
-        const data = await response.json();
-
-        if (active) {
-          setUnreadCount(data.unread_count ?? 0);
-        }
-      } catch (error) {
-        console.error("Unable to load unread count:", error);
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        loadUnreadCount();
-      }
-    }
-
-    loadUnreadCount();
-
-    // Refresh every 30 seconds while the page is visible.
-    const intervalId = window.setInterval(loadUnreadCount, 30000);
-
-    window.addEventListener("notifications-updated", loadUnreadCount);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
+    let alive = true;
+    api("/auth/me")
+      .then((me) => alive && setUser(me))
+      .catch(() => {});
     return () => {
-      active = false;
-      window.clearInterval(intervalId);
-      window.removeEventListener("notifications-updated", loadUnreadCount);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      alive = false;
     };
-  }, [pathname]);
+  }, []);
 
+  // Route guard: admins live under /admin, members never see /admin.
   useEffect(() => {
-    async function loadUser() {
+    if (!user) return;
+    const inAdmin = pathname.startsWith("/admin");
+    if (user.is_admin && !inAdmin && !pathname.startsWith("/todos/") && !pathname.startsWith("/teams/")) {
+      router.replace("/admin");
+    } else if (!user.is_admin && inAdmin) {
+      router.replace("/my-tasks");
+    }
+  }, [user, pathname, router]);
+
+  // Unread notifications (members only).
+  useEffect(() => {
+    if (!user || user.is_admin) return;
+    let alive = true;
+    async function load() {
+      if (document.visibilityState === "hidden") return;
       try {
-        const response = await fetch("/api/auth/me", {
-          cache: "no-store",
-        });
-
-        if (response.status === 401) {
-          router.replace("/login");
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error("Unable to load user profile.");
-        }
-
-        const data = await response.json();
-        setUser(data);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
+        const data = await api("/notifications/unread-count");
+        if (alive) setUnread(data.unread_count ?? 0);
+      } catch {}
     }
+    load();
+    const timer = setInterval(load, 30000);
+    window.addEventListener("notifications-updated", load);
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      window.removeEventListener("notifications-updated", load);
+      document.removeEventListener("visibilitychange", load);
+    };
+  }, [user, pathname]);
 
-    loadUser();
-  }, [router]);
+  useEffect(() => setOpen(false), [pathname]);
 
-  async function handleLogout() {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-      });
-    } finally {
-      router.replace("/login");
-      router.refresh();
-    }
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
   }
 
-  const currentPage =
-    navigation
-      .flatMap((section) => section.items)
-      .find((item) => item.href === pathname)?.name || "Workspace";
-
-  if (loading || !user) {
+  if (!user) {
     return (
-      <div className={styles.loading}>
-        <span>Loading workspace...</span>
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <Loading />
       </div>
     );
   }
 
+  const isActive = (href) =>
+    href === "/admin" ? pathname === "/admin" : pathname === href || pathname.startsWith(`${href}/`);
+
+  const pmCount = user.pm_team_ids?.length ?? 0;
+  const roleLabel = user.is_admin
+    ? "Administrator"
+    : pmCount
+      ? `PM of ${pmCount} team${pmCount > 1 ? "s" : ""}`
+      : "Member";
+
+  const link = (href, label, extra) => (
+    <Link key={href} href={href} className={`${styles.link} ${isActive(href) ? styles.active : ""}`}>
+      {extra}
+      <span className={styles.linkLabel}>{label}</span>
+    </Link>
+  );
+
   return (
-    <div className={styles.shell}>
-      {sidebarOpen && (
-        <button
-          className={styles.overlay}
-          onClick={() => setSidebarOpen(false)}
-          aria-label="Close navigation"
-        />
-      )}
+    <UserContext.Provider value={user}>
+      <ToastProvider>
+        <div className={styles.shell}>
+          <header className={styles.mobileBar}>
+            <button className={styles.burger} onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
+            <span className={styles.brand}><i className={styles.mark} />Teamboard</span>
+          </header>
 
-      <aside
-        className={`${styles.sidebar} ${
-          sidebarOpen ? styles.sidebarOpen : ""
-        }`}
-      >
-        <div className={styles.brand}>
-          <Link href="/todos">TODO WORKSPACE</Link>
-          <span>PERSONAL PRODUCTIVITY</span>
-        </div>
+          {open && <div className={styles.scrim} onClick={() => setOpen(false)} />}
 
-        <nav className={styles.navigation}>
-          {navigation
-          .filter(
-            (section) =>
-              section.label !== "MANAGEMENT" || user.role === "ADMIN"
-          )
-            .map((section) => (
-            <div key={section.label} className={styles.navSection}>
-              <p className={styles.sectionLabel}>{section.label}</p>
+          <aside className={`${styles.sidebar} ${open ? styles.sidebarOpen : ""}`}>
+            <Link href="/" className={styles.brand}>
+              <i className={styles.mark} />Teamboard
+            </Link>
 
-              {section.items.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`${styles.navLink} ${
-                    pathname === item.href ? styles.active : ""
-                  }`}
-                >
-                  <span>{item.name}</span>
+            <nav className={styles.nav}>
+              {user.is_admin ? (
+                <>
+                  <p className={styles.group}>Owner</p>
+                  {ADMIN_NAV.map((n) => link(n.href, n.name, <span className={styles.glyph}>{n.glyph}</span>))}
+                </>
+              ) : (
+                <>
+                  <p className={styles.group}>Workspace</p>
+                  {link("/my-tasks", "My tasks", <span className={styles.glyph}>✓</span>)}
+                  <Link
+                    href="/notifications"
+                    className={`${styles.link} ${isActive("/notifications") ? styles.active : ""}`}
+                  >
+                    <span className={styles.glyph}>◉</span>
+                    <span className={styles.linkLabel}>Notifications</span>
+                    {unread > 0 && <span className={styles.count}>{unread > 99 ? "99+" : unread}</span>}
+                  </Link>
 
-                  {item.href === "/notifications" && unreadCount > 0 && (
-                    <span className={styles.notificationBadge}>
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
+                  <p className={styles.group}>Teams</p>
+                  {user.memberships.length === 0 && <p className={styles.none}>Not in a team yet</p>}
+                  {user.memberships.map((m) =>
+                    link(
+                      `/teams/${m.team.id}`,
+                      m.team.name,
+                      <>
+                        <TeamDot color={m.team.color} />
+                        {m.role === "PM" && <span className={styles.pm}>PM</span>}
+                      </>
+                    )
                   )}
-                </Link>
-              ))}
+                </>
+              )}
+            </nav>
+
+            <div className={styles.account}>
+              <Avatar name={user.name} large />
+              <div className={styles.who}>
+                <strong>{user.name}</strong>
+                <span>{roleLabel}</span>
+              </div>
+              <button className={styles.logout} onClick={logout} title="Sign out" aria-label="Sign out">⎋</button>
             </div>
-          ))}
-        </nav>
+          </aside>
 
-        <div className={styles.sidebarFooter}>
-          <div className={styles.userInfo}>
-            <span className={styles.userName}>
-              {user.first_name || user.username}
-            </span>
-            <span className={styles.userEmail}>{user.email}</span>
-          </div>
-
-          <button
-            className={styles.logoutButton}
-            onClick={handleLogout}
-          >
-            Sign out
-          </button>
+          <main className={styles.main}>{children}</main>
         </div>
-      </aside>
-
-      <main className={styles.main}>
-        <header className={styles.topbar}>
-          <button
-            className={styles.menuButton}
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open navigation"
-          >
-            MENU
-          </button>
-
-          <span className={styles.breadcrumb}>
-            WORKSPACE / {currentPage.toUpperCase()}
-          </span>
-
-          <span className={styles.topbarUser}>
-            {user.first_name || user.username}
-          </span>
-        </header>
-
-        <div className={styles.content}>{children}</div>
-      </main>
-    </div>
+      </ToastProvider>
+    </UserContext.Provider>
   );
 }
